@@ -278,10 +278,47 @@ export function makeEnvScene() {
   const sky = new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), new THREE.ShaderMaterial({
     side: THREE.BackSide,
     vertexShader: 'varying vec3 p; void main(){ p = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
-    fragmentShader: 'varying vec3 p; void main(){ vec3 top = vec3(0.55,0.45,1.0); vec3 hor = vec3(1.0,0.62,0.78); vec3 bot = vec3(0.12,0.1,0.16); vec3 c = p.y > 0. ? mix(hor, top, pow(p.y, .6)) : mix(hor*.6, bot, pow(-p.y, .5)); gl_FragColor = vec4(c, 1.); }',
+    fragmentShader: 'varying vec3 p; void main(){ vec3 top = vec3(0.25,0.42,1.0); vec3 hor = vec3(1.0,0.78,0.6); vec3 bot = vec3(0.12,0.1,0.16); vec3 c = p.y > 0. ? mix(hor, top, pow(p.y, .6)) : mix(hor*.6, bot, pow(-p.y, .5)); gl_FragColor = vec4(c, 1.); }',
   }));
   sc.add(sky);
   const box = (w, h, x, y, z, c = 0xffffff, k = 6) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(k), side: THREE.DoubleSide })); m.position.set(x, y, z); m.lookAt(0, 0, 0); sc.add(m); };
   box(6, 2, 0, 8, 2); box(2, 5, -7, 2, -3, 0xffe6c8, 4); box(2, 5, 7, 1, 3, 0xd8c8ff, 3); box(3, 1, 3, 3, -8, 0xffffff, 5);
   return sc;
+}
+
+export function checkTexture(base = 0xd9b98a, line = 0x8a2a1a) {
+  const c = canvas(128, 128), x = c.getContext('2d');
+  const hx = n => '#' + n.toString(16).padStart(6, '0');
+  x.fillStyle = hx(base); x.fillRect(0, 0, 128, 128);
+  x.globalAlpha = 0.85; x.fillStyle = '#1a1a1a';
+  for (let i = 0; i < 128; i += 32) { x.fillRect(i + 12, 0, 6, 128); x.fillRect(0, i + 12, 128, 6); }
+  x.fillStyle = '#ffffff'; x.globalAlpha = 0.7; for (let i = 0; i < 128; i += 32) { x.fillRect(i + 26, 0, 2, 128); x.fillRect(0, i + 26, 128, 2); }
+  x.fillStyle = hx(line); x.globalAlpha = 0.9; for (let i = 0; i < 128; i += 64) { x.fillRect(i + 44, 0, 3, 128); x.fillRect(0, i + 44, 128, 3); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 1); return t;
+}
+export function crateTexture() {
+  const c = canvas(128, 128), x = c.getContext('2d'), r = rng(9);
+  x.fillStyle = '#c8873e'; x.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 5; i++) { const v = (r() - 0.5) * 30; x.fillStyle = `rgb(${200 + v},${135 + v},${62 + v})`; x.fillRect(0, i * 25.6 + 1, 128, 23); }
+  x.strokeStyle = 'rgba(80,40,10,0.5)'; x.lineWidth = 2; for (let i = 0; i < 30; i++) { const y = r() * 128; x.beginPath(); x.moveTo(r() * 128, y); x.lineTo(r() * 128, y + (r() - 0.5) * 3); x.stroke(); }
+  x.fillStyle = '#7a4a1c'; x.fillRect(0, 0, 128, 12); x.fillRect(0, 116, 128, 12); x.fillRect(0, 0, 12, 128); x.fillRect(116, 0, 12, 128);
+  x.save(); x.translate(64, 64); x.rotate(Math.PI / 4); x.fillRect(-90, -6, 180, 12); x.restore();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+export function stripeTexture(a = '#ffcc33', b = '#111111') {
+  const c = canvas(64, 64), x = c.getContext('2d'); x.fillStyle = a; x.fillRect(0, 0, 64, 64);
+  x.fillStyle = b; for (let i = -64; i < 128; i += 22) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i + 11, 0); x.lineTo(i + 11 - 64, 64); x.lineTo(i - 64, 64); x.fill(); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+}
+export function rayTexture(n = 14) {
+  const c = canvas(512, 512), x = c.getContext('2d');
+  x.translate(256, 256);
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2, w = Math.PI / n * 0.55;
+    const g = x.createRadialGradient(0, 0, 0, 0, 0, 256); g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = g; x.beginPath(); x.moveTo(0, 0); x.arc(0, 0, 256, a - w, a + w); x.closePath(); x.fill();
+  }
+  const g = x.createRadialGradient(0, 0, 0, 0, 0, 120); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(-256, -256, 512, 512);
+  return new THREE.CanvasTexture(c);
 }

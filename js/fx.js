@@ -51,7 +51,7 @@ export class BloodFX {
     m.position.set(x, y + (this.decalIdx % 10) * 0.0015, z); m.rotation.y = Math.random() * 6.28; m.scale.setScalar(size); m.visible = true; m.material.opacity = 0.92;
     return m;
   }
-  pool(x, z) { const m = this.decal(x, z, 0.2, 0.08); this.pools.push({ m, t: 0 }); }
+  pool(x, z, y = 0) { const m = this.decal(x, z, 0.2, y + 0.08); this.pools.push({ m, t: 0 }); }
   clear() {
     this.d.length = 0; this.c.length = 0; this.decals.forEach(m => (m.visible = false)); this.pools.length = 0;
     this.drops.count = 0; this.coins.count = 0;

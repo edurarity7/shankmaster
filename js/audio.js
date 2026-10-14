@@ -84,12 +84,24 @@ export function stab(pos) {
   const ws = ctx.createWaveShaper(); const curve = new Float32Array(256).map((_, i) => Math.tanh((i / 128 - 1) * 6)); ws.curve = curve;
   chain(noise(t + 0.02, 0.12, { rate: 0.5 }), cr, ws, env(t + 0.02, 0.003, 0.03, 0.09, 0.5), out(pos));
 }
-export function grunt(pos, pitch = 1, long = false) {
-  if (!ctx) return; const t = now(), dur = long ? 0.55 : 0.22;
-  const o = osc('sawtooth', 135 * pitch); o.frequency.setValueAtTime(150 * pitch, t); o.frequency.exponentialRampToValueAtTime(90 * pitch, t + dur);
-  const f1 = filt('bandpass', 650, 4), f2 = filt('bandpass', 1150, 5), g = env(t, 0.02, dur * 0.4, dur * 0.6, 0.55);
-  o.connect(f1); o.connect(f2); f1.connect(g); f2.connect(g); g.connect(out(pos)); o.start(t); o.stop(t + dur + 0.1);
+// Synth voice: buzzy glottal source + vowel formants + breath. Sounds like "ugh!" / "argh".
+const VOWELS = [[640, 1190, 2390], [800, 1150, 2800], [500, 900, 2500], [560, 1700, 2500]];
+export function grunt(pos, pitch = 1, long = false, vol = 0.7) {
+  if (!ctx) return; const t = now(), dur = long ? 0.6 : 0.2 + Math.random() * 0.08;
+  const f0 = (115 + Math.random() * 30) * pitch;
+  const o = osc('sawtooth', f0), o2 = osc('square', f0 * 1.005);
+  o.frequency.setValueAtTime(f0 * 1.25, t); o.frequency.exponentialRampToValueAtTime(f0 * (long ? 0.6 : 0.8), t + dur);
+  o2.frequency.setValueAtTime(f0 * 1.25, t); o2.frequency.exponentialRampToValueAtTime(f0 * (long ? 0.6 : 0.8), t + dur);
+  const vib = osc('sine', 7 + Math.random() * 4), vg = ctx.createGain(); vg.gain.value = f0 * 0.04; chain(vib, vg, o.frequency); vib.start(t); vib.stop(t + dur + 0.1);
+  const src = ctx.createGain(); src.gain.value = 0.5; o.connect(src); o2.connect(src);
+  const ws = ctx.createWaveShaper(); ws.curve = new Float32Array(256).map((_, i) => Math.tanh((i / 128 - 1) * 2.5));
+  const [F1, F2, F3] = VOWELS[Math.floor(Math.random() * VOWELS.length)];
+  const g = env(t, 0.012, dur * 0.35, dur * 0.65, vol);
+  [[F1, 6, 1], [F2, 8, 0.6], [F3, 10, 0.25]].forEach(([f, q, a]) => { const bp = filt('bandpass', f, q); const ga = ctx.createGain(); ga.gain.value = a * 3; src.connect(ws); ws.connect(bp); bp.connect(ga); ga.connect(g); });
+  chain(noise(t, dur), filt('bandpass', 1800, 0.7), env(t, 0.005, dur * 0.2, dur * 0.6, 0.18 * vol), out(pos)); // breath
+  g.connect(out(pos)); o.start(t); o2.start(t); o.stop(t + dur + 0.1); o2.stop(t + dur + 0.1);
 }
+export function hurt() { grunt(null, 0.85 + Math.random() * 0.1, false, 0.9); }
 export function thud(pos) {
   if (!ctx) return; const t = now();
   const o = osc('sine', 70); o.frequency.exponentialRampToValueAtTime(35, t + 0.25);
@@ -122,7 +134,7 @@ export function heartbeat(rate = 1) {
   if (!ctx) return; const t = now(); if (t - lastBeat < 0.75 / rate) return; lastBeat = t;
   [0, 0.17].forEach((d, i) => { const o = osc('sine', i ? 48 : 55); chain(o, env(t + d, 0.01, 0.03, 0.12, 0.9), sfx); o.start(t + d); o.stop(t + d + 0.25); });
 }
-export function hitMarker() { if (!ctx) return; const t = now(); const o = osc('square', 1800); chain(o, filt('bandpass', 1800, 3), env(t, 0.001, 0.01, 0.04, 0.12), sfx); o.start(t); o.stop(t + 0.08); }
+export function hitMarker(big) { if (!ctx) return; const t = now(); const o = osc('square', big ? 1400 : 1800); chain(o, filt('bandpass', 1800, 3), env(t, 0.001, 0.01, 0.04, 0.12), sfx); o.start(t); o.stop(t + 0.08); }
 export function beep(f = 880, d = 0.12, v = 0.3, type = 'square') { if (!ctx) return; const t = now(); const o = osc(type, f); chain(o, filt('lowpass', 3000), env(t, 0.005, d, 0.08, v), sfx); o.start(t); o.stop(t + d + 0.15); }
 export function chord(freqs, d = 0.6, v = 0.18, type = 'sawtooth', delay = 0) {
   if (!ctx) return; const t = now() + delay;
@@ -158,3 +170,16 @@ export function ambience(on) {
   };
   sirenTimer = setTimeout(siren, 9000);
 }
+
+export function jumpSfx(pos) { if (!ctx) return; const t = now(); chain(noise(t, 0.12), filt('bandpass', 700, 1), env(t, 0.005, 0.02, 0.1, 0.35), out(pos)); const o = osc('sine', 180); o.frequency.exponentialRampToValueAtTime(320, t + 0.12); chain(o, env(t, 0.005, 0.02, 0.1, 0.12), out(pos)); o.start(t); o.stop(t + 0.2); }
+export function land(pos, k = 0.5) { if (!ctx) return; const t = now(); chain(noise(t, 0.12, { rate: 0.5 }), filt('lowpass', 600), env(t, 0.002, 0.02, 0.12, 0.4 + k * 0.6), out(pos)); }
+export function boing(pos) { if (!ctx) return; const t = now(); const o = osc('triangle', 140); o.frequency.exponentialRampToValueAtTime(620, t + 0.25); const lfo = osc('sine', 18), lg = ctx.createGain(); lg.gain.value = 40; chain(lfo, lg, o.frequency); chain(o, env(t, 0.005, 0.1, 0.25, 0.4), out(pos)); o.start(t); o.stop(t + 0.45); lfo.start(t); lfo.stop(t + 0.45); }
+export function pickup(type, pos) { if (!ctx) return; const base = type === 'chicken' ? 660 : 880; [0, 4, 7, 12].forEach((s, i) => setTimeout(() => { const t = now(), o = osc('triangle', base * Math.pow(2, s / 12)); chain(o, env(t, 0.005, 0.04, 0.12, 0.2), out(pos)); o.start(t); o.stop(t + 0.2); }, i * 55)); }
+export function dodge() { if (!ctx) return; whoosh(0.8, null, 1.6); beep(1760, 0.05, 0.12, 'triangle'); }
+export function levelUp() { [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => beep(f, 0.12, 0.16, 'triangle'), i * 90)); setTimeout(() => chord([1047, 1319, 1568], 1.0, 0.1, 'triangle'), 480); }
+export function countTick(i = 0) { beep(900 + (i % 12) * 60, 0.02, 0.08, 'triangle'); }
+export function claim() { coin(); setTimeout(() => beep(1568, 0.1, 0.14, 'triangle'), 120); }
+export function chestShake(level = 0) { if (!ctx) return; const t = now(); chain(noise(t, 0.15, { rate: 0.6 }), filt('bandpass', 300 + level * 120, 2), env(t, 0.005, 0.05, 0.1, 0.5), sfx); const o = osc('sine', 90 + level * 20); chain(o, env(t, 0.005, 0.05, 0.15, 0.4), sfx); o.start(t); o.stop(t + 0.25); }
+export function rarityUp(level) { if (!ctx) return; const base = [392, 494, 587, 698, 880][level] || 440; [0, 7, 12].forEach((s, i) => setTimeout(() => beep(base * Math.pow(2, s / 12), 0.09, 0.2, 'sawtooth'), i * 60)); whoosh(1.2, null, 1.4); }
+export function chestOpen() { if (!ctx) return; const t = now(); chain(noise(t, 0.8), filt('highpass', 2000), env(t, 0.005, 0.1, 0.7, 0.4), sfx); const o = osc('sine', 60); o.frequency.exponentialRampToValueAtTime(30, t + 0.6); chain(o, env(t, 0.005, 0.1, 0.5, 1.0), sfx); o.start(t); o.stop(t + 0.8); shing(null, 0.2); }
+export function swoosh() { whoosh(0.6, null, 1.8); }

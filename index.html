@@ -5,11 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#2b1a5c">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#071a5e">
 <title>Shankmaster</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M8 52 L40 12 Q52 4 56 8 Q60 12 52 24 L14 56Z' fill='%23ff2d55' stroke='%23111' stroke-width='4'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M6 40h14v-8H6z' fill='%23111'/%3E%3Cpath d='M20 28h4v16h-4z' fill='%23ffc21a'/%3E%3Cpath d='M24 30h26q8 2 12 6q-6 6-14 6H24z' fill='%23a8c4ff' stroke='%23071a5e' stroke-width='2'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Lilita+One&family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Lilita+One&family=Rubik:wght@500;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": {
@@ -21,67 +22,84 @@
 <body>
 <canvas id="gl"></canvas>
 <canvas id="screenBlood"></canvas>
-<div id="hurt"></div>
+<div id="hurt"><i class="dir"></i></div>
 <div id="lowhp"></div>
+<div id="speedlines"></div>
+<div id="flash"></div>
 
 <!-- ============ LOADING ============ -->
 <section id="loading" class="screen show">
-  <div class="logo big">SHANK<span>MASTER</span></div>
+  <div class="logo-slot big"></div>
   <div class="loadbar"><i></i></div>
-  <p class="hint">sharpening blades…</p>
+  <p class="hint" id="loadHint">Sharpening blades…</p>
 </section>
 
-<!-- ============ HOME ============ -->
-<section id="home" class="screen">
-  <header class="topbar">
-    <div class="logo">SHANK<span>MASTER</span></div>
-    <div class="wallet">
-      <button class="chip" data-go="store"><b class="coin"></b><span id="coins">0</span></button>
-      <button class="chip chest-chip" id="chestChip"><b class="chest"></b><span id="chestCount">0</span></button>
-      <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button>
+<!-- ============ LOBBY ============ -->
+<section id="lobby" class="screen">
+  <header class="lobby-top">
+    <button class="player-chip" id="playerChip">
+      <span class="lvl"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="ring-bg"/><circle cx="18" cy="18" r="15" class="ring" id="xpRing"/></svg><b id="lvlNum">1</b></span>
+      <span class="pc-text"><b id="pcName">YOU</b><small id="pcRank">Unranked</small></span>
+    </button>
+    <div class="currencies">
+      <button class="cur" data-tab="shop"><b class="coin"></b><span id="coins">0</span><i>+</i></button>
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8.9 5.2l2-1.6-2-3.4-2.4.8a7.7 7.7 0 00-1.6-.9L16.4 5h-4l-.5 2.6a7.7 7.7 0 00-1.6.9l-2.4-.8-2 3.4 2 1.6a7.6 7.6 0 000 1.6l-2 1.6 2 3.4 2.4-.8c.5.4 1 .7 1.6.9l.5 2.6h4l.5-2.6c.6-.2 1.1-.5 1.6-.9l2.4.8 2-3.4-2-1.6a7.6 7.6 0 000-1.6z" fill="currentColor"/></svg></button>
     </div>
   </header>
-  <div class="home-body">
-    <div class="rank-card" id="rankCard"></div>
-    <div class="loadout-card" id="loadoutCard"></div>
+
+  <div class="side side-l">
+    <button class="side-btn" id="dailyBtn"><span class="ico">🎁</span><small>DAILY</small><i class="badge" id="dailyBadge">!</i></button>
+    <button class="side-btn" data-tab="pass"><span class="ico">📜</span><small>QUESTS</small><i class="badge" id="questBadge"></i></button>
   </div>
-  <footer class="home-actions">
-    <button class="btn ghost" data-go="locker">LOCKER</button>
-    <button class="btn ghost" data-go="store">STORE</button>
-    <button class="btn play" id="playBtn">PLAY RANKED<small>1v1 · first to 3</small></button>
-  </footer>
-</section>
-
-<!-- ============ LOCKER ============ -->
-<section id="locker" class="screen panel-screen">
-  <header class="topbar"><button class="back" data-go="home">‹ BACK</button><h2>LOCKER</h2><div class="tabs" id="lockerTabs">
-    <button data-tab="knives" class="on">KNIVES</button><button data-tab="chars">CHARACTERS</button><button data-tab="fins">FINISHERS</button></div></header>
-  <div class="locker-body">
-    <div class="grid" id="lockerGrid"></div>
-    <aside class="detail" id="lockerDetail"></aside>
+  <div class="side side-r">
+    <button class="side-btn chest-btn" id="chestBtn"><span class="ico chest-ico"></span><small>CHESTS</small><i class="badge" id="chestBadge"></i></button>
+    <button class="side-btn" data-tab="shop"><span class="ico">🛒</span><small>SHOP</small><i class="badge new" id="shopBadge">NEW</i></button>
   </div>
+
+  <!-- HOME (battle) -->
+  <div class="tab show" id="tab-home">
+    <div class="home-logo logo-slot"></div>
+    <div class="home-bottom">
+      <div class="winchest" id="winChest"></div>
+      <button class="btn-play" id="playBtn"><span>PLAY</span><small>RANKED 1v1 · THE ENDZ</small></button>
+    </div>
+  </div>
+  <!-- SHOP -->
+  <div class="tab sheet" id="tab-shop"><div class="sheet-inner" id="shopBody"></div></div>
+  <!-- LOCKER -->
+  <div class="tab sheet" id="tab-locker">
+    <div class="seg" id="lockerSeg"><button data-seg="knives" class="on">KNIVES</button><button data-seg="drip">DRIP</button><button data-seg="fins">FINISHERS</button></div>
+    <div class="slotbar" id="slotBar"></div>
+    <div class="sheet-inner" id="lockerBody"></div>
+  </div>
+  <!-- PASS / QUESTS -->
+  <div class="tab sheet" id="tab-pass"><div class="sheet-inner" id="passBody"></div></div>
+  <!-- RANK -->
+  <div class="tab sheet" id="tab-rank"><div class="sheet-inner" id="rankBody"></div></div>
+
+  <nav class="navbar" id="navbar">
+    <button data-tab="shop"><span>🛒</span><small>SHOP</small></button>
+    <button data-tab="locker"><span>🔪</span><small>LOCKER</small></button>
+    <button data-tab="home" class="battle on"><span>⚔️</span><small>BATTLE</small></button>
+    <button data-tab="pass"><span>📜</span><small>QUESTS</small></button>
+    <button data-tab="rank"><span>🏆</span><small>RANK</small></button>
+  </nav>
 </section>
 
-<!-- ============ STORE ============ -->
-<section id="store" class="screen panel-screen">
-  <header class="topbar"><button class="back" data-go="home">‹ BACK</button><h2>STORE</h2>
-    <div class="wallet"><span class="chip"><b class="coin"></b><span class="coinsMirror">0</span></span></div></header>
-  <div class="store-body" id="storeBody"></div>
-</section>
-
-<!-- ============ CASE OPENING ============ -->
-<section id="caseOpen" class="screen overlay">
-  <h2 class="case-title">ENDZ CHEST</h2>
-  <div class="reel-wrap"><div class="reel" id="reel"></div><div class="reel-marker"></div></div>
-  <div class="case-result" id="caseResult"></div>
-  <div class="case-actions" id="caseActions"></div>
+<!-- ============ CHEST REVEAL ============ -->
+<section id="reveal" class="screen">
+  <div class="rv-top"><b id="rvTier">RARE</b><small id="rvSub">Tap the chest!</small></div>
+  <div class="rv-tap" id="rvTap">TAP!</div>
+  <div class="reel-wrap" id="reelWrap"><div class="reel" id="reel"></div><div class="reel-marker"></div></div>
+  <div class="rv-card" id="rvCard"></div>
+  <div class="rv-actions" id="rvActions"></div>
 </section>
 
 <!-- ============ MATCHMAKING ============ -->
 <section id="mm" class="screen overlay">
   <div class="mm-box">
     <h2 id="mmTitle">FINDING OPPONENT</h2>
-    <div class="spinner"></div>
+    <div class="radar"><i></i></div>
     <p id="mmTime">0:00</p>
     <div class="vs" id="vs"></div>
     <button class="btn ghost small" id="mmCancel">CANCEL</button>
@@ -90,39 +108,48 @@
 
 <!-- ============ HUD ============ -->
 <section id="hud" class="screen hud">
-  <div class="scorebar">
-    <div class="sb-side me"><span class="sb-name">YOU</span><b id="sbMe">0</b></div>
-    <div class="sb-mid"><small id="sbRound">ROUND 1</small><b id="sbTime">1:15</b></div>
-    <div class="sb-side op"><b id="sbOp">0</b><span class="sb-name" id="sbOpName">OPP</span></div>
+  <div class="hud-top">
+    <button class="hud-pause" id="pauseBtn" aria-label="Pause">❚❚</button>
+    <div class="scorepill">
+      <div class="sp-side me"><i class="av">YOU</i><b id="sbMe">0</b></div>
+      <div class="sp-mid"><b id="sbTime">1:15</b><small id="sbRound">R1</small></div>
+      <div class="sp-side op"><b id="sbOp">0</b><i class="av" id="sbOpAv">OPP</i></div>
+    </div>
+    <div class="earned" id="earned"><b class="coin"></b><span>0</span></div>
   </div>
   <div class="killfeed" id="killfeed"></div>
-  <div class="crosshair"></div>
+  <div class="crosshair"><i></i><i></i><i></i><i></i></div>
   <div class="hitmark" id="hitmark"></div>
-  <div class="dmgnum" id="dmgnum"></div>
+  <div class="combo" id="combo"></div>
+  <div id="floaters"></div>
   <div class="banner" id="banner"></div>
   <div class="countdown" id="countdown"></div>
   <div class="toast" id="toast"></div>
-  <div class="finprompt" id="finPrompt"><span id="finText">DOUBLE TAP</span> — FINISH THEM</div>
-  <div class="hp"><i class="cross">✚</i><b id="hpNum">100</b><div class="hpbar"><i id="hpBar"></i></div></div>
-  <div class="abilities"><div class="ab" id="abDash"><i></i><span>DASH</span></div><div class="ab" id="abSprint"><span>SPRINT</span></div></div>
-  <div class="knifename" id="knifeName"></div>
-  <button class="icon-btn hud-btn" id="pauseBtn" aria-label="Pause">❚❚</button>
-  <button class="icon-btn hud-btn" id="inspectBtn" aria-label="Inspect">◎</button>
-  <div class="joy" id="joy"><i></i></div>
-  <div class="tutorial" id="tutorial"></div>
+  <div class="hint-chip" id="hintChip"></div>
   <div class="roundres" id="roundRes"></div>
+
+  <div class="hp" id="hpBox"><div class="hp-bar"><i class="ghost" id="hpGhost"></i><i class="fill" id="hpBar"></i><span class="segs"></span></div><b id="hpNum">100</b></div>
+  <div class="buffs" id="buffs"></div>
+
+  <div class="joy-ghost" id="joyGhost"></div>
+  <div class="joy" id="joy"><i></i></div>
+  <div class="actions" id="actions">
+    <button class="act fin" id="finBtn"><span>💀</span><small>FINISH</small></button>
+    <button class="act dash" id="dashBtn"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" class="cd" id="dashRing"/></svg><span>»</span></button>
+    <button class="act jump" id="jumpBtn"><span>⤒</span><small>JUMP</small></button>
+  </div>
 </section>
 
 <!-- ============ RESULT ============ -->
 <section id="result" class="screen overlay">
+  <div class="result-rays"></div>
   <div class="result-box" id="resultBox"></div>
 </section>
 
-<!-- ============ PAUSE / SETTINGS ============ -->
+<!-- ============ MODAL ============ -->
 <section id="modal" class="screen overlay"><div class="modal-box" id="modalBox"></div></section>
 
-<div class="rotate-hint" id="rotateHint">↻ Turn your phone sideways for the best view</div>
-
+<div class="toast-global" id="gToast"></div>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

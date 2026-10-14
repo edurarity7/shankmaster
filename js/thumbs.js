@@ -11,8 +11,9 @@ export class Thumbs {
     this.r.outputColorSpace = THREE.SRGBColorSpace; this.r.toneMapping = THREE.ACESFilmicToneMapping; this.r.toneMappingExposure = 1.15;
     this.scene = new THREE.Scene();
     const pm = new THREE.PMREMGenerator(this.r); this.scene.environment = pm.fromScene(makeEnvScene(), 0.03).texture;
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x553366, 1.2));
-    const d = new THREE.DirectionalLight(0xffffff, 2); d.position.set(2, 3, 4); this.scene.add(d);
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x334477, 1.3));
+    const d = new THREE.DirectionalLight(0xffffff, 2.2); d.position.set(2, 3, 4); this.scene.add(d);
+    const rim = new THREE.DirectionalLight(0x6fb0ff, 1.5); rim.position.set(-3, 1, -2); this.scene.add(rim);
     this.cam = new THREE.PerspectiveCamera(22, 2, 0.01, 50);
     this.cache = new Map();
   }
@@ -20,8 +21,8 @@ export class Thumbs {
     this.r.setSize(w, h, false); this.cam.aspect = w / h;
     const box = new THREE.Box3().setFromObject(obj), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
     obj.position.sub(c);
-    const fitH = size.y / 2 / Math.tan(THREE.MathUtils.degToRad(this.cam.fov / 2)), fitW = size.x / 2 / Math.tan(THREE.MathUtils.degToRad(this.cam.fov / 2)) / this.cam.aspect;
-    this.cam.position.set(0, 0, Math.max(fitH, fitW) * pad + size.z); this.cam.lookAt(0, 0, 0); this.cam.updateProjectionMatrix();
+    const t = Math.tan(THREE.MathUtils.degToRad(this.cam.fov / 2));
+    this.cam.position.set(0, 0, Math.max(size.y / 2 / t, size.x / 2 / t / this.cam.aspect) * pad + size.z); this.cam.lookAt(0, 0, 0); this.cam.updateProjectionMatrix();
   }
   knife(item, w = 320, h = 160) {
     const key = `k|${item.knife}|${item.skin}|${item.seed}|${Math.round(item.float * 50)}|${w}`;
@@ -34,17 +35,35 @@ export class Thumbs {
     this.scene.remove(g); disposeKnife(k);
     this.cache.set(key, url); return url;
   }
-  char(id, w = 200, h = 200) {
-    const key = `c|${id}|${w}`;
+  // Thumbnail of one drip item, worn by the player's own character, framed on that body part.
+  drip(outfit, slot, w = 180, h = 150) {
+    const key = 'd|' + slot + JSON.stringify(outfit) + w;
     if (this.cache.has(key)) return this.cache.get(key);
-    const c = new Character(id, null); const g = new THREE.Group(); g.add(c.root);
-    c.update(0.016, { speed: 0 }); c.root.rotation.y = Math.PI - 0.35;
-    c.root.updateMatrixWorld(true);
-    this.scene.add(g); this.frame(g, w, h, 1.0);
-    this.cam.position.y += 0.3; this.cam.lookAt(0, 0.25, 0);
+    const c = new Character(outfit, null); const g = new THREE.Group(); g.add(c.root);
+    c.update(0.016, { speed: 0 });
+    const back = slot === 'back';
+    c.root.rotation.y = back ? 0.5 : Math.PI - 0.35; c.root.updateMatrixWorld(true);
+    const F = { head: [1.82, 1.15, 22], face: [1.74, 0.95, 20], top: [1.25, 2.4, 30], neck: [1.42, 1.2, 24], back: [1.3, 2.2, 30], gloves: [1.0, 1.5, 30], legs: [0.55, 2.4, 32], kicks: [0.1, 1.3, 28] }[slot] || [1.2, 3, 30];
+    this.scene.add(g);
+    this.r.setSize(w, h, false); this.cam.aspect = w / h; this.cam.fov = F[2];
+    this.cam.position.set(0.15, F[0] + 0.1, F[1] + 0.2); this.cam.lookAt(0, F[0], 0); this.cam.updateProjectionMatrix();
     this.r.render(this.scene, this.cam);
     const url = this.r.domElement.toDataURL('image/png');
-    this.scene.remove(g);
+    this.scene.remove(g); this.cam.fov = 22;
+    this.cache.set(key, url); return url;
+  }
+  // head-and-shoulders portrait of an outfit
+  char(outfit, w = 220, h = 220) {
+    const key = 'c|' + JSON.stringify(outfit) + w;
+    if (this.cache.has(key)) return this.cache.get(key);
+    const c = new Character(outfit, null); const g = new THREE.Group(); g.add(c.root);
+    c.update(0.016, { speed: 0 }); c.root.rotation.y = Math.PI - 0.3; c.root.updateMatrixWorld(true);
+    this.scene.add(g);
+    this.r.setSize(w, h, false); this.cam.aspect = w / h; this.cam.fov = 26;
+    this.cam.position.set(0.25, 1.75, 2.4); this.cam.lookAt(0, 1.45, 0); this.cam.updateProjectionMatrix();
+    this.r.render(this.scene, this.cam);
+    const url = this.r.domElement.toDataURL('image/png');
+    this.scene.remove(g); this.cam.fov = 22;
     this.cache.set(key, url); return url;
   }
 }
