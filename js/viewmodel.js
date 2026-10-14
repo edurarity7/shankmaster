@@ -1,6 +1,7 @@
 // First-person arm + knife, rendered in its own scene on top of the world (like CS viewmodels).
 import * as THREE from 'three';
-import { buildKnife, setKnifeBlood } from './knives.js';
+import { buildKnife, setKnifeBlood, knifeTrick, TRICK_CLICKS } from './knives.js';
+import * as A from './audio.js';
 import { toon, inked, outfitLook } from './characters.js';
 
 // Keyframes: [time 0..1, pos[x,y,z], rot[x,y,z]] for the arm pivot (right shoulder-ish, in camera space).
@@ -36,10 +37,8 @@ const K = {
   ],
   inspect: [
     [0, [0.2, -0.22, -0.36], [0.05, 0.12, 0]],
-    [0.18, [0.06, -0.12, -0.34], [0.2, 1.3, 0.4]],
-    [0.45, [0.04, -0.12, -0.34], [0.25, 1.5, 0.5]],
-    [0.62, [0.08, -0.16, -0.34], [-0.4, -0.4, -0.6]],
-    [0.82, [0.08, -0.16, -0.34], [-0.45, -0.5, -0.7]],
+    [0.12, [0.07, -0.13, -0.34], [0.25, 0.9, 0.25]],
+    [0.88, [0.06, -0.12, -0.34], [0.3, 1.0, 0.3]],
     [1, [0.2, -0.22, -0.36], [0.05, 0.12, 0]],
   ],
   draw: [
@@ -93,13 +92,13 @@ export class ViewModel {
     [0, 1, 2, 3].forEach(i => { const f = inked(new THREE.CapsuleGeometry(0.013, 0.03, 4, 8), toon(handC, gs), { shadow: false }); f.position.set(-0.035, -0.02 + (i - 1.5) * 0.024, -0.005); f.rotation.z = Math.PI / 2; arm.add(f); });
     if (gl.kind === 'wraps') [0.0, 0.035].forEach(z => { const w = inked(new THREE.TorusGeometry(0.045, 0.01, 6, 16), toon(gl.c), { shadow: false }); w.position.set(0.0, -0.01, z); arm.add(w); });
     if (gl.kind === 'glove' && gl.a) { const c = inked(new THREE.TorusGeometry(0.044, 0.012, 6, 16), toon(gl.a, gs), { shadow: false }); c.position.set(0.01, -0.015, 0.05); arm.add(c); }
-    this.knife = buildKnife(item);
+    this.knife = buildKnife(item, { hi: true });
     const X = new THREE.Vector3(-0.22, 0.42, -0.88).normalize();
     const Y = new THREE.Vector3(0.15, 1, 0.35); Y.addScaledVector(X, -Y.dot(X)).normalize();
     const Z = new THREE.Vector3().crossVectors(X, Y);
     this.knife.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
     this.baseQ = this.knife.quaternion.clone();
-    this.knife.position.set(-0.01, 0.0, 0.0);
+    this.knife.position.set(-0.01, 0.0, 0.0); this.basePos = this.knife.position.clone();
     arm.add(this.knife);
     this.arm = arm; this.item = item; this.blood = 0; setKnifeBlood(this.knife, 0);
     this.play('draw', 0.7);
@@ -108,7 +107,14 @@ export class ViewModel {
     if (name === 'inspect' && this.anim && this.anim.name !== 'inspect') return;
     this.anim = { name, t: 0, dur, onHit, hitAt, fired: false };
   }
-  cancel() { if (this.anim && this.anim.name !== 'fin') { this.anim = null; this.knife.quaternion.copy(this.baseQ); } }
+  cancel() { if (this.anim && this.anim.name !== 'fin') { this.anim = null; knifeTrick(this.knife, 0, 'none'); this.applyTrick([0, 0, 0]); } }
+  // rotate the knife around its trick pivot (finger ring for karambits, grip otherwise)
+  applyTrick([x, y, z]) {
+    const p = this.knife.userData.spinPivot, q = this.baseQ.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z)));
+    this.knife.quaternion.copy(q);
+    this.knife.position.copy(this.basePos).add(p.clone().applyQuaternion(this.baseQ)).sub(p.clone().applyQuaternion(q));
+  }
+  setTrak(n) { this.knife.userData.setTrak?.(n); }
   playFinisher(style, dur, onHit, hits) {
     const seq = FIN[style] || FIN.stitch;
     this.anim = { name: 'fin', seq, t: 0, dur, onHit, hits, fired: 0 };
@@ -136,13 +142,12 @@ export class ViewModel {
         pose = sample(K[a.name], a.t);
         if (!a.fired && a.t >= a.hitAt) { a.fired = true; a.onHit?.(); }
       }
-      const bf = this.knife.userData.bfPivots;
-      if (bf && (a.name === 'inspect' || a.name === 'draw')) {
-        const f = Math.sin(Math.min(1, a.t) * Math.PI * 2);
-        bf[0].rotation.z = f * Math.PI; bf[1].rotation.z = -f * Math.PI * 0.2;
+      if (a.name === 'inspect' || a.name === 'draw') {
+        const ex = knifeTrick(this.knife, Math.min(1, a.t), a.name);
+        this.applyTrick(ex);
+        if (a.name === 'inspect') { const cl = TRICK_CLICKS[this.item.knife] || TRICK_CLICKS.default; a.clicked ??= 0; while (a.clicked < cl.length && a.t >= cl[a.clicked]) { a.clicked++; A.flipClick(); } }
       }
-      if (a.name === 'inspect' && this.item.knife === 'karambit') this.knife.quaternion.copy(this.baseQ).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sin(a.t * Math.PI) * Math.PI * 2));
-      if (a.t >= 1) { this.anim = null; if (bf) bf.forEach(p => (p.rotation.z = 0)); this.knife.quaternion.copy(this.baseQ); }
+      if (a.t >= 1) { this.anim = null; knifeTrick(this.knife, 0, 'none'); this.applyTrick([0, 0, 0]); }
     }
     // portrait: keep the arm smaller and tucked into the corner so the fight stays visible
     const portrait = this.camera.aspect < 1, xs = Math.max(0.5, Math.min(1, this.camera.aspect / 1.6));

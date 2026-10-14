@@ -3,8 +3,8 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { DRIP, SKIN_TONES, DEFAULT_OUTFIT } from './data.js';
-import { toonGradient, checkTexture } from './textures.js';
-import { buildKnife } from './knives.js';
+import { toonGradient, checkTexture, fabricBump } from './textures.js';
+import { buildKnife, disposeKnife } from './knives.js';
 
 const outlineMat = new THREE.ShaderMaterial({
   uniforms: { thickness: { value: 0.0085 }, color: { value: new THREE.Color(0x0a0f2e) } },
@@ -15,16 +15,17 @@ const outlineMat = new THREE.ShaderMaterial({
 export { outlineMat };
 
 // Toon material with a cool fresnel rim — gives the "premium mobile game" pop.
-const RIM = { value: new THREE.Color(0x9fc4ff).multiplyScalar(0.55) };
+const RIM = { value: new THREE.Color(0x9fc4ff).multiplyScalar(0.45) };
+// Stylised PBR material with a cool fresnel rim — Fortnite-like shading with our cartoon flair.
 export function toon(color, extra = {}) {
-  const { rim = 1, ...rest } = extra;
-  const m = new THREE.MeshToonMaterial({ color, gradientMap: toonGradient(), ...rest });
+  const { rim = 1, rough = 0.62, metal = 0, bump = false, ...rest } = extra;
+  const m = new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, envMapIntensity: metal > 0.5 ? 1.3 : 0.65, ...(bump ? { bumpMap: fabricBump(), bumpScale: 0.9 } : {}), ...rest });
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uRim = RIM; sh.uniforms.uRimK = { value: rim };
     sh.fragmentShader = 'uniform vec3 uRim; uniform float uRimK;\n' + sh.fragmentShader.replace('#include <opaque_fragment>',
       'outgoingLight += uRim * uRimK * pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 2.6);\n#include <opaque_fragment>');
   };
-  m.customProgramCacheKey = () => 'toonrim';
+  m.customProgramCacheKey = () => 'pbrrim';
   return m;
 }
 export function inked(geo, mat, { outline = true, shadow = true } = {}) {
@@ -71,7 +72,8 @@ export class Character {
   build() {
     const skin = SKIN_TONES[this.outfit.skin ?? 3];
     const top = this.d('top'), legs = this.d('legs'), kicks = this.d('kicks'), head = this.d('head'), face = this.d('face');
-    const shinyTop = top.shiny ? { emissive: 0x2a1a00, rim: 2.2 } : undefined;
+    const shinyTop = top.shiny ? { emissive: 0x1a1000, rim: 2, metal: 0.85, rough: 0.28 } : { rough: top.kind === 'puffer' ? 0.3 : top.kind === 'track' ? 0.5 : 0.85, bump: top.kind !== 'puffer' };
+    const legsX = { rough: legs.kind === 'trackies' && /Denim/.test(legs.name) ? 0.85 : 0.75, bump: true };
     this.body = G(); this.root.add(this.body);
     this.hips = G(); this.hips.position.y = 0.85; this.body.add(this.hips);
 
@@ -81,22 +83,22 @@ export class Character {
     this.legs = [-1, 1].map(side => {
       const hip = G(); hip.position.set(0.1 * side, 0, 0); this.hips.add(hip);
       if (shorts) {
-        this.p(limb(0.1 + baggy, 0.095 + baggy, 0.27), legs.c, hip, [0, 0.02, 0]);
+        this.p(limb(0.1 + baggy, 0.095 + baggy, 0.27), legs.c, hip, [0, 0.02, 0], undefined, legsX);
         this.p(limb(0.078, 0.07, 0.2), skin, hip, [0, -0.23, 0]);
         this.p(new THREE.BoxGeometry(0.012, 0.22, 0.02), legs.a, hip, [0.112 * side, -0.1, 0], undefined, undefined, { outline: false });
       } else {
-        this.p(limb(0.105 + baggy, 0.086 + baggy, 0.4), legs.c, hip, [0, 0.02, 0]);
+        this.p(limb(0.105 + baggy, 0.086 + baggy, 0.4), legs.c, hip, [0, 0.02, 0], undefined, legsX);
         if (legs.kind === 'cargos') this.p(rbox(0.05, 0.1, 0.09, 0.015), legs.c, hip, [0.1 * side, -0.24, 0]);
       }
       const knee = G(); knee.position.y = -0.39; hip.add(knee);
       const shinC = shorts ? skin : legs.c;
-      this.p(sph(0.084 + (shorts ? 0 : baggy * 0.7)), shinC, knee);
-      this.p(limb(0.082 + (shorts ? 0 : baggy * 0.6), 0.07 + (shorts ? 0 : baggy * 0.5), 0.34), shinC, knee);
+      this.p(sph(0.084 + (shorts ? 0 : baggy * 0.7)), shinC, knee, [0, 0, 0], undefined, shorts ? undefined : legsX);
+      this.p(limb(0.082 + (shorts ? 0 : baggy * 0.6), 0.07 + (shorts ? 0 : baggy * 0.5), 0.34), shinC, knee, [0, 0, 0], undefined, shorts ? undefined : legsX);
       if (legs.kind === 'trackies' && /Trackies/.test(legs.name)) this.p(new THREE.TorusGeometry(0.07, 0.018, 8, 20), legs.c, knee, [0, -0.32, 0]).rotation.x = Math.PI / 2;
       this.shoe(knee, kicks);
       return { hip, knee };
     });
-    this.p(sph(1), legs.c, this.hips, [0, 0.03, 0], [0.2, 0.14, 0.15]);
+    this.p(sph(1), legs.c, this.hips, [0, 0.03, 0], [0.2, 0.14, 0.15], legsX);
 
     // ---- torso ----
     this.torso = G(); this.torso.position.y = 0.88; this.body.add(this.torso);
@@ -109,6 +111,8 @@ export class Character {
     const shR = puff ? 0.105 : 0.088;
     [-1, 1].forEach(s => this.p(sph(shR), top.c, T, [0.225 * s, 0.43, 0], [1, 0.9, 0.95], shinyTop));
     if (puff) {
+      [1, 2, 3].forEach(i => { const y = i / 7 - 0.02, r = base.reduce((a, [rr, yy]) => Math.abs(yy - y - 0.02) < Math.abs(a[1] - y - 0.02) ? [rr, yy] : a, [0, 9])[0] + bulk;
+        const st = this.p(new THREE.TorusGeometry(r, 0.006, 6, 40), new THREE.Color(top.c).multiplyScalar(0.45).getHex(), T, [0, y, 0], [1.08, 0.74, 1], { rough: 0.6 }, { outline: false }); st.rotation.x = Math.PI / 2; });
       this.p(new THREE.TorusGeometry(0.12, 0.065, 12, 28), top.c, T, [0, 0.54, 0], [1, 1, 0.9], shinyTop).rotation.x = Math.PI / 2;
       this.p(new THREE.BoxGeometry(0.012, 0.46, 0.012), top.a, T, [0, 0.27, -0.205], undefined, undefined, { outline: false });
     } else if (top.kind === 'track') {
@@ -150,7 +154,7 @@ export class Character {
     });
   }
   shoe(knee, k) {
-    const y = -0.38, shiny = k.shiny ? { emissive: 0x2a1a00, rim: 2 } : undefined;
+    const y = -0.38, shiny = k.shiny ? { emissive: 0x1a1000, rim: 2, metal: 0.85, rough: 0.25 } : { rough: 0.42 };
     if (k.kind === 'sliders') {
       this.p(cyl(0.072, 0.066, 0.16), 0xffffff, knee, [0, y + 0.06, 0]);
       this.p(rbox(0.12, 0.035, 0.27, 0.015), k.c, knee, [0, y - 0.035, -0.045]);
@@ -164,6 +168,7 @@ export class Character {
     this.p(sph(1), k.c, knee, [0, y, -0.12], [0.064, 0.05, 0.07], shiny);
     if (tall) this.p(cyl(0.078, 0.076, 0.12), k.c, knee, [0, y + 0.08, -0.005], undefined, shiny);
     if (k.kind === 'high') this.p(new THREE.TorusGeometry(0.074, 0.014, 6, 18), k.a, knee, [0, y + 0.14, -0.005]).rotation.x = Math.PI / 2;
+    if (k.kind !== 'boots') for (let i = 0; i < 3; i++) this.p(rbox(0.07, 0.008, 0.012, 0.003), 0xf6f6f6, knee, [0, y + 0.06 - i * 0.012, -0.07 - i * 0.03], undefined, { rough: 0.8 }, { outline: false }).rotation.x = -0.5;
     if (k.kind === 'low' || k.kind === 'high') this.p(rbox(0.012, 0.03, 0.12, 0.005), k.a === k.c ? 0xd0d0d0 : k.a, knee, [0.071, y, -0.06], undefined, undefined, { outline: false }).rotation.x = -0.2;
   }
   buildHand(hand, side, c, gl) {
@@ -185,7 +190,9 @@ export class Character {
       this.p(sph(0.034), skin, H, [0.152 * s, 0.0, 0.0], [0.5, 1, 0.8]);
       if (!covered) {
         this.p(sph(1), 0xeeeeee, H, [0.058 * s, 0.022, -0.128], [0.04, 0.047, 0.026], { rim: 0 }, { outline: false });
-        this.p(sph(1), 0x1a1020, H, [0.058 * s, 0.017, -0.148], [0.022, 0.027, 0.012], undefined, { outline: false });
+        this.p(sph(1), 0x5a3218, H, [0.058 * s, 0.017, -0.146], [0.024, 0.028, 0.012], { rough: 0.15 }, { outline: false });
+        this.p(sph(1), 0x0a0608, H, [0.058 * s, 0.017, -0.152], [0.012, 0.015, 0.006], { rough: 0.1 }, { outline: false });
+        const lid = this.p(sph(0.043, 0, Math.PI * 2, 0, Math.PI * 0.42), skin, H, [0.058 * s, 0.024, -0.128], [0.98, 1.12, 0.66], undefined, { outline: false }); lid.rotation.x = -0.35;
         this.p(sph(0.007), 0xffffff, H, [0.051 * s, 0.03, -0.158], undefined, { emissive: 0x666666, rim: 0 }, { outline: false });
         const brow = this.p(rbox(0.065, 0.018, 0.022, 0.008), 0x1a120e, H, [0.06 * s, 0.083, -0.14]);
         brow.rotation.z = -0.22 * s; brow.rotation.y = 0.15 * s;
@@ -247,7 +254,7 @@ export class Character {
       [[-0.07, 0.15], [0, 0.175], [0.07, 0.15], [-0.04, 0.12, 0.09], [0.04, 0.12, 0.09]].forEach(([x, y, z = -0.02]) => this.p(cyl(0.024, 0.024, 0.075, 12), head.a, H, [x, y, z]).rotation.z = Math.PI / 2);
     } else if (k === 'crown') {
       hairCap(0x1a120e);
-      const gold = { emissive: 0x553300, rim: 2.5 };
+      const gold = { emissive: 0x2a1800, rim: 2, metal: 1, rough: 0.2 };
       this.p(cyl(0.14, 0.135, 0.07, 28, true), head.c, H, [0, 0.16, 0], undefined, { ...gold, side: THREE.DoubleSide });
       for (let i = 0; i < 6; i++) {
         const a = i / 6 * Math.PI * 2;
@@ -259,8 +266,11 @@ export class Character {
   neckItem(T) {
     const n = this.d('neck');
     if (n.kind === 'chain' || n.kind === 'iced') {
-      const extra = n.kind === 'iced' ? { emissive: 0x88ccff, rim: 3 } : { emissive: 0x442800, rim: 2 };
-      this.p(new THREE.TorusGeometry(0.135, 0.013, 8, 34), n.c, T, [0, 0.5, -0.07], undefined, extra).rotation.x = 1.15;
+      const extra = n.kind === 'iced' ? { emissive: 0x4a7aa0, rim: 3, metal: 0.7, rough: 0.08 } : { emissive: 0x221400, rim: 1.6, metal: 1, rough: 0.22 };
+      // cuban links: alternating little tori around the neck
+      const chain = new THREE.Group(); chain.position.set(0, 0.5, -0.07); chain.rotation.x = 1.15; T.add(chain);
+      const lm = this.m(n.c, extra), lg = new THREE.TorusGeometry(0.0105, 0.0042, 8, 14);
+      for (let i = 0; i < 30; i++) { const a = i / 30 * Math.PI * 2; const l = new THREE.Mesh(lg, lm); l.position.set(Math.cos(a) * 0.135, Math.sin(a) * 0.135, 0); l.rotation.set(i % 2 ? Math.PI / 2 : 0, 0, a + Math.PI / 2); chain.add(l); }
       this.p(n.kind === 'iced' ? new THREE.OctahedronGeometry(0.04) : rbox(0.05, 0.06, 0.015, 0.008), n.c, T, [0, 0.38, -0.205], undefined, extra);
     }
   }
@@ -284,11 +294,16 @@ export class Character {
     }
   }
   setKnife(item) {
-    if (this.knife) this.arms[1].hand.remove(this.knife);
+    if (this.knife) { this.arms[1].hand.remove(this.knife); disposeKnife(this.knife); }
     this.knife = buildKnife(item, { shadows: true });
     this.knife.rotation.set(0, Math.PI / 2, 0);
     this.knife.position.set(0, -0.02, -0.01); this.knife.scale.setScalar(1.8);
     this.arms[1].hand.add(this.knife);
+  }
+  dispose() {
+    if (this.knife) { this.knife.parent?.remove(this.knife); disposeKnife(this.knife); this.knife = null; } // knife materials are shared — only free geometry
+    this.root.traverse(o => { if (o.isMesh) { o.geometry.dispose(); if (o.material !== outlineMat) o.material.dispose?.(); } });
+    this.root.parent?.remove(this.root);
   }
   flash() { this.flashT = 0.1; this.hitT = 1; }
   kill(backwards = true) { this.deadT = 0; this.fallDir = backwards ? 1 : -1; }

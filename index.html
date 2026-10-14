@@ -7,6 +7,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#071a5e">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-title" content="Shankmaster">
 <title>Shankmaster</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M6 40h14v-8H6z' fill='%23111'/%3E%3Cpath d='M20 28h4v16h-4z' fill='%23ffc21a'/%3E%3Cpath d='M24 30h26q8 2 12 6q-6 6-14 6H24z' fill='%23a8c4ff' stroke='%23071a5e' stroke-width='2'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -116,6 +119,7 @@
       <div class="sp-side op"><b id="sbOp">0</b><i class="av" id="sbOpAv">OPP</i></div>
     </div>
     <div class="earned" id="earned"><b class="coin"></b><span>0</span></div>
+    <button class="hud-inspect" id="inspectBtn" aria-label="Inspect knife"><svg viewBox="0 0 24 24"><path d="M3 17l9-9 3 3-9 9H3z" fill="currentColor"/><path d="M14 6l2-2 4 4-2 2z" fill="currentColor"/><path d="M19 13a5 5 0 01-2 4M17 2a5 5 0 014 2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></button>
   </div>
   <div class="killfeed" id="killfeed"></div>
   <div class="crosshair"><i></i><i></i><i></i><i></i></div>
@@ -149,6 +153,7 @@
 <!-- ============ MODAL ============ -->
 <section id="modal" class="screen overlay"><div class="modal-box" id="modalBox"></div></section>
 
+<div id="fxLayer"></div>
 <div class="toast-global" id="gToast"></div>
 <script type="module" src="js/main.js"></script>
 </body>

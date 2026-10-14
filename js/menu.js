@@ -1,7 +1,8 @@
 // Main-menu stage: your character on a glowing podium in front of a royal-blue London skyline. Drag to spin.
 import * as THREE from 'three';
 import { Character, toon } from './characters.js';
-import { buildKnife } from './knives.js';
+import { buildKnife, disposeKnife, knifeTrick, TRICK_CLICKS } from './knives.js';
+import * as A from './audio.js';
 import { radialTexture } from './textures.js';
 
 export class MenuStage {
@@ -64,22 +65,25 @@ export class MenuStage {
     this.bindDrag();
   }
   bindDrag() {
-    let last = null;
-    const down = e => { if (e.target.id !== 'gl') return; last = e.clientX; };
+    let last = null, moved = 0;
+    const down = e => { if (e.target.id !== 'gl') return; last = e.clientX; moved = 0; };
     addEventListener('pointerdown', down);
-    addEventListener('pointermove', e => { if (last == null || !this.active) return; this.spinVel = (e.clientX - last) * 0.012; this.spin += this.spinVel; last = e.clientX; });
-    addEventListener('pointerup', () => { last = null; });
+    addEventListener('pointermove', e => { if (last == null || !this.active) return; moved += Math.abs(e.clientX - last); this.spinVel = (e.clientX - last) * 0.012; this.spin += this.spinVel; last = e.clientX; });
+    addEventListener('pointerup', () => { if (last != null && moved < 8 && this.active && this.mode === 'home') { this.emote(); A.flipClick(); setTimeout(A.flipClick, 300); } last = null; }); // tap your character → knife twirl
   }
   setCharacter(outfit, item) {
+    this.char?.dispose();
     this.holder.clear();
     this.char = new Character(outfit, item);
     this.char.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
     this.holder.add(this.char.root);
   }
   setKnife(item) {
+    if (this.knife) disposeKnife(this.knife);
     this.knifeHolder.clear();
-    const k = buildKnife(item); k.scale.setScalar(5.2); this.knifeHolder.add(k); this.knife = k;
+    const k = buildKnife(item, { hi: true }); k.scale.setScalar(5.2); this.knifeHolder.add(k); this.knife = k; this.knifeItem = item;
   }
+  inspect() { this.inspectT = 0; this.clicks = 0; A.inspectShing(); }
   emote() { this.emoteT = 0; }
   update(dt, aspect) {
     this.t += dt;
@@ -102,7 +106,7 @@ export class MenuStage {
     if (M === 'knife') { want = new THREE.Vector3(0, 1.45, 2.6); look = new THREE.Vector3(0, 1.4, 0.6); fov = portrait ? 46 : 34; }
     else if (M === 'head') { want = new THREE.Vector3(0.15, 2.0, 2.1); look = new THREE.Vector3(0, 1.95, 0); fov = portrait ? 40 : 30; }
     else if (M === 'legs') { want = new THREE.Vector3(0.2, 0.9, 2.8); look = new THREE.Vector3(0, 0.75, 0); }
-    else if (M === 'body') { want = new THREE.Vector3(0.2, 1.5, 3.0); look = new THREE.Vector3(0, 1.4, 0); }
+    else if (M === 'body') { want = new THREE.Vector3(0.2, 1.55, 4.4); look = new THREE.Vector3(0, 1.45, 0); }
     else if (M === 'store') { want = new THREE.Vector3(0, 1.4, 6.2); look = new THREE.Vector3(0, 1.6, 0); }
     else { want = portrait ? new THREE.Vector3(0, 1.5, 6.6) : new THREE.Vector3(0, 1.35, 5.6); look = new THREE.Vector3(0, portrait ? 1.2 : 1.1, 0); }
     if (M !== 'home') { // a bottom sheet covers ~60% of the screen: frame the subject in the space above it
@@ -113,7 +117,15 @@ export class MenuStage {
     C.position.lerp(want, Math.min(1, dt * 4)); this.look.lerp(look, Math.min(1, dt * 4)); C.lookAt(this.look);
     C.fov += (fov - C.fov) * Math.min(1, dt * 4); C.aspect = aspect; C.updateProjectionMatrix();
     this.knifeHolder.visible = M === 'knife';
-    if (this.knife) { this.knifeHolder.position.set(0, 1.4, 0.6); this.knife.rotation.set(0.2 + Math.sin(this.t) * 0.1, this.t * 0.8, 0.5); }
+    if (this.knife) {
+      this.knifeHolder.position.set(0, 1.4, 0.6); this.knife.rotation.set(0.2 + Math.sin(this.t) * 0.1, this.t * 0.8, 0.5);
+      if (this.inspectT != null && this.inspectT < 1) {
+        this.inspectT = Math.min(1, this.inspectT + dt / 2.4);
+        const ex = knifeTrick(this.knife, this.inspectT, 'inspect'); this.knife.rotation.x += ex[0]; this.knife.rotation.y += ex[1]; this.knife.rotation.z += ex[2];
+        const cl = TRICK_CLICKS[this.knifeItem?.knife] || TRICK_CLICKS.default; while (this.clicks < cl.length && this.inspectT >= cl[this.clicks]) { this.clicks++; A.flipClick(); }
+        if (this.inspectT >= 1) knifeTrick(this.knife, 0, 'none');
+      }
+    }
     this.holder.visible = M !== 'knife';
     this.key.target.position.set(0, 1, 0);
   }

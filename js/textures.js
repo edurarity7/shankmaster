@@ -67,6 +67,13 @@ const SKIN_DEFS = {
   ruby:    { metal: 1, rough: 0.04, emissive: 0x330004, px: (u, v, N, seed) => swirl(u, v, N, seed, [[0, 0x1a0002], [0.3, 0x5e0010], [0.6, 0xc4062a], [0.85, 0xff2b52], [1, 0xff9db0]]) },
   sapphire:{ metal: 1, rough: 0.04, emissive: 0x00102e, px: (u, v, N, seed) => swirl(u, v, N, seed, [[0, 0x00030f], [0.3, 0x041a5c], [0.6, 0x0c4fd4], [0.85, 0x34a2ff], [1, 0xb8e2ff]]) },
   emerald: { metal: 1, rough: 0.04, emissive: 0x002810, px: (u, v, N, seed) => swirl(u, v, N, seed, [[0, 0x000d05], [0.3, 0x024d22], [0.6, 0x0aa74a], [0.85, 0x3ff58e], [1, 0xc8ffd9]]) },
+  holo: { metal: 1, rough: 0.12, special: 'holo', px: (u, v, N) => { const n = N.fbm(u * 3, v * 3, 3) * 0.1; const s = 0.82 + n + 0.1 * Math.sin((u + v) * 9); return [s * 235, s * 238, s * 248]; } },
+  lava: { metal: 0.3, rough: 0.55, special: 'lava', px: (u, v, N) => { const c = Math.abs(N.fbm(u * 5, v * 3, 5)); const k = c < 0.045 ? 1 - c / 0.045 : 0; const base = 18 + N.fbm(u * 12, v * 12, 3) * 14; return [base + k * 255, base * 0.8 + k * 120, base * 0.7 + k * 10]; } },
+  galaxy: { metal: 0.5, rough: 0.2, special: 'galaxy', px: (u, v, N) => {
+    const w = N.fbm(u * 2 + 3, v * 2, 4), n = N.fbm(u * 3 + w * 2, v * 3 + w, 5);
+    let c = ramp([[0, 0x04020e], [0.4, 0x1a0b4a], [0.65, 0x5a1fa8], [0.85, 0xe04fd8], [1, 0x7fe8ff]], n * 1.3 + 0.45);
+    const st = N.n2(u * 220, v * 220); if (st > 0.66) c = [255, 255, 255]; else if (st > 0.6) c = c.map(x => Math.min(255, x + 90));
+    return c; } },
   bloodweb: { metal: 0.35, rough: 0.32, px: (u, v, N) => { const n = N.fbm(u * 4, v * 4, 3) * 0.12; return [168 + n * 200, 12, 14]; }, post: drawWeb },
   fade: { metal: 1, rough: 0.08, px: (u, v, N, seed) => {
     const off = (seed % 100) / 400; const t = u * 0.9 + v * 0.25 + off + 0.04 * N.n2(u * 3, v * 3);
@@ -111,37 +118,99 @@ function drawWeb(ctx, W, H, r) {
 }
 
 const skinCache = new Map();
-// Returns { map, metalness, roughness, emissive }.
-export function skinMaterialParams(skin, seed = 0, flt = 0.05) {
-  const key = `${skin}|${seed}|${Math.round(flt * 50)}`;
+// Returns { map, emissiveMap?, metalness, roughness, emissive, special }.
+// Patterns are bucketed (6 per skin) so the reel and thumbnails stay fast; hi = 512px hero texture.
+export function skinMaterialParams(skin, seed = 0, flt = 0.05, hi = false) {
+  const pat = seed % 6, wear = Math.round(flt * 20);
+  const key = `${skin}|${pat}|${wear}|${hi ? 1 : 0}`;
   if (skinCache.has(key)) return skinCache.get(key);
   const def = SKIN_DEFS[skin] || SKIN_DEFS.stock;
-  const W = 256, H = 128, c = canvas(W, H), ctx = c.getContext('2d');
-  const N = makeNoise(seed + skin.length * 31);
+  const W = hi ? 512 : 256, H = W / 2, c = canvas(W, H), ctx = c.getContext('2d');
+  const N = makeNoise(pat * 131 + skin.length * 31 + 7);
   const img = ctx.createImageData(W, H), d = img.data;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const [r, g, b] = def.px(x / W, 1 - y / H, N, seed);
+    const [r, g, b] = def.px(x / W, 1 - y / H, N, pat * 157);
     const i = (y * W + x) * 4; d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
   if (def.post) def.post(ctx, W, H, N.r);
+  let emissiveMap = null;
+  if (def.special === 'lava' || def.special === 'galaxy') { // glow comes from the bright bits only
+    const e = canvas(W, H), ex = e.getContext('2d'); const src = ctx.getImageData(0, 0, W, H), out = ex.createImageData(W, H);
+    for (let i = 0; i < src.data.length; i += 4) { const l = Math.max(src.data[i], src.data[i + 1], src.data[i + 2]); const k = l > 150 ? (l - 150) / 105 : 0; out.data[i] = src.data[i] * k; out.data[i + 1] = src.data[i + 1] * k; out.data[i + 2] = src.data[i + 2] * k; out.data[i + 3] = 255; }
+    ex.putImageData(out, 0, 0); emissiveMap = new THREE.CanvasTexture(e); emissiveMap.colorSpace = THREE.SRGBColorSpace; emissiveMap.wrapS = THREE.RepeatWrapping;
+  }
+  const S = W / 256;
   // wear: scratches / chipped paint revealing steel
-  const scratches = Math.floor(flt * 260);
-  const R = rng(seed + 99);
-  for (let i = 0; i < scratches; i++) {
-    const x = R() * W, y = R() * H, len = 4 + R() * 24 * flt * 2, a = R() * Math.PI;
-    ctx.strokeStyle = `rgba(200,204,210,${0.25 + R() * 0.5})`; ctx.lineWidth = 0.6 + R() * flt * 3;
+  const R = rng(seed % 6 + 99 + wear);
+  for (let i = 0, n = Math.floor(flt * 260); i < n; i++) {
+    const x = R() * W, y = R() * H, len = (4 + R() * 24 * flt * 2) * S, a = R() * Math.PI;
+    ctx.strokeStyle = `rgba(200,204,210,${0.25 + R() * 0.5})`; ctx.lineWidth = (0.6 + R() * flt * 3) * S;
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len * 0.3); ctx.stroke();
   }
-  // polished edge highlight along the cutting edge (bottom)
-  const g = ctx.createLinearGradient(0, H, 0, H - 14); g.addColorStop(0, 'rgba(255,255,255,0.35)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g; ctx.fillRect(0, H - 14, W, 14);
-  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
-  // Painted/anodised finishes keep some diffuse colour so they read vividly; bare steel stays fully metallic.
-  const bare = skin === 'stock' || skin === 'patina';
-  const out = { map: tex, metalness: bare ? 0.88 : Math.min(def.metal, 0.6), roughness: Math.min(1, Math.max(bare ? 0.2 : 0.16, def.rough) + flt * 0.25), emissive: def.emissive || 0 };
+  // grind: the sharpened bevel along the edge is lighter, with a crisp grind line
+  const gy = H * 0.7;
+  const g = ctx.createLinearGradient(0, H, 0, gy); g.addColorStop(0, 'rgba(255,255,255,0.42)'); g.addColorStop(0.25, 'rgba(255,255,255,0.16)'); g.addColorStop(1, 'rgba(255,255,255,0.08)');
+  ctx.fillStyle = g; ctx.fillRect(0, gy, W, H - gy);
+  ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(0, gy - 1.2 * S, W, 1.4 * S);
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(0, gy + 0.4 * S, W, 0.8 * S);
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(0, 0, W, 2 * S); // polished spine
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; tex.wrapS = THREE.RepeatWrapping;
+  const bare = skin === 'stock' || skin === 'patina' || skin === 'holo';
+  const out = { map: tex, emissiveMap, special: def.special, metalness: bare ? 0.9 : Math.min(def.metal, 0.6), roughness: Math.min(1, Math.max(bare ? 0.16 : 0.14, def.rough) + flt * 0.22), emissive: def.emissive || 0 };
   skinCache.set(key, out);
   return out;
+}
+
+// Shared blade normal map: brushed grain + the edge bevel slope.
+let bladeN;
+export function bladeNormalMap() {
+  if (bladeN) return bladeN;
+  const W = 512, H = 256, N = makeNoise(3), hgt = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const v = 1 - y / H, u = x / W;
+    const bevel = v < 0.3 ? (v / 0.3) * (v / 0.3) * 0.6 : 0.6;
+    hgt[y * W + x] = bevel + N.n2(u * 3, v * 260) * 0.012 + N.n2(u * 40, v * 900) * 0.006;
+  }
+  const c = canvas(W, H), x = c.getContext('2d'), img = x.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) {
+    const i = y * W + xx, l = hgt[y * W + Math.max(0, xx - 1)], r = hgt[y * W + Math.min(W - 1, xx + 1)], t = hgt[Math.max(0, y - 1) * W + xx], b = hgt[Math.min(H - 1, y + 1) * W + xx];
+    let nx = (l - r) * 40, ny = (b - t) * 40, nz = 1; const len = Math.hypot(nx, ny, nz); nx /= len; ny /= len; nz /= len;
+    img.data.set([(nx * 0.5 + 0.5) * 255, (ny * 0.5 + 0.5) * 255, (nz * 0.5 + 0.5) * 255, 255], i * 4);
+  }
+  x.putImageData(img, 0, 0);
+  bladeN = new THREE.CanvasTexture(c); return bladeN;
+}
+
+// Handle materials' textures: wood, g10, rubber (knurled), tape, paracord.
+const handleCache = {};
+export function handleTexture(kind, tint = '#ff6a00') {
+  const key = kind + tint; if (handleCache[key]) return handleCache[key];
+  const W = 256, H = 128, c = canvas(W, H), x = c.getContext('2d'), N = makeNoise(kind.length * 17), R = rng(kind.length * 9);
+  if (kind === 'wood') {
+    const img = x.createImageData(W, H);
+    for (let i = 0; i < W * H; i++) { const px = i % W, py = (i / W) | 0; const g = Math.sin((py / H * 18 + N.fbm(px / 60, py / 30, 4) * 6) * Math.PI); const k = 0.75 + g * 0.12 + N.n2(px / 3, py / 40) * 0.06; img.data.set([150 * k, 88 * k, 44 * k, 255], i * 4); }
+    x.putImageData(img, 0, 0);
+  } else if (kind === 'g10') {
+    const img = x.createImageData(W, H);
+    for (let i = 0; i < W * H; i++) { const px = i % W, py = (i / W) | 0; const g = Math.sin((N.fbm(px / 50, py / 50, 4) * 14) * Math.PI); const k = g > 0.6 ? 70 : g > 0 ? 38 : 22; img.data.set([k, k * 1.02, k * 1.08, 255], i * 4); }
+    x.putImageData(img, 0, 0);
+  } else if (kind === 'rubber') {
+    x.fillStyle = '#1c1d22'; x.fillRect(0, 0, W, H);
+    for (let yy = 0; yy < H; yy += 6) for (let xx = (yy / 6) % 2 * 3; xx < W; xx += 6) { x.fillStyle = 'rgba(255,255,255,0.09)'; x.beginPath(); x.moveTo(xx, yy - 2); x.lineTo(xx + 2, yy); x.lineTo(xx, yy + 2); x.lineTo(xx - 2, yy); x.fill(); }
+  } else if (kind === 'tape') {
+    x.fillStyle = '#a7a9ad'; x.fillRect(0, 0, W, H);
+    for (let i = 0; i < 300; i++) { x.strokeStyle = `rgba(${R() < 0.5 ? '255,255,255' : '40,40,40'},0.12)`; x.beginPath(); const yy = R() * H; x.moveTo(0, yy); x.lineTo(W, yy + (R() - 0.5) * 8); x.stroke(); }
+    for (let i = 0; i < 12; i++) { x.strokeStyle = 'rgba(60,60,60,0.25)'; x.lineWidth = 2; const xx = R() * W; x.beginPath(); x.moveTo(xx, 0); x.lineTo(xx + (R() - 0.5) * 30, H); x.stroke(); }
+  } else { // paracord
+    x.fillStyle = '#121214'; x.fillRect(0, 0, W, H);
+    for (let yy = -H; yy < H * 2; yy += 10) for (let xx = 0; xx < W; xx += 10) {
+      x.fillStyle = ((xx + yy) / 10) % 2 ? tint : '#1a1a1d';
+      x.beginPath(); x.ellipse(xx, yy + xx * 0.5, 5.5, 3, 0.5, 0, 7); x.fill();
+    }
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+  return (handleCache[key] = t);
 }
 
 // CSS gradient approximating a skin, for UI chips.
@@ -150,6 +219,7 @@ export const SKIN_SWATCH = {
   ultraviolet: 'linear-gradient(90deg,#220833,#5a1a96)', patina: 'linear-gradient(90deg,#2a52c9,#9a9590,#d8a640)', tiger: 'repeating-linear-gradient(100deg,#f6cd5b 0 10px,#9c4a10 10px 14px)',
   butcher: 'linear-gradient(90deg,#7a0a14,#e7a3ae)', doppler: 'linear-gradient(90deg,#0a0412,#8a1d6e,#ff9fbf)', gamma: 'linear-gradient(90deg,#03140c,#1fae6b,#c8ffe4)',
   bloodweb: 'linear-gradient(90deg,#a40c0e,#c81616)', fade: 'linear-gradient(90deg,#f7e43c,#ff8a3d,#f04b9a,#7a3bd8)', marble: 'linear-gradient(90deg,#1f4bff,#d4120f,#ffd23a)',
+  holo: 'linear-gradient(90deg,#ff9be8,#9be8ff,#fff59b,#b99bff)', lava: 'linear-gradient(90deg,#120c0a,#ff5a00,#ffd23a,#120c0a)', galaxy: 'linear-gradient(90deg,#0a0420,#5a1fa8,#e04fd8,#7fe8ff)',
   ruby: 'linear-gradient(90deg,#3a0006,#c4062a,#ff6f8c)', sapphire: 'linear-gradient(90deg,#020a2e,#0c4fd4,#7cc4ff)', emerald: 'linear-gradient(90deg,#00180a,#0aa74a,#8bffbb)',
 };
 
@@ -321,4 +391,15 @@ export function rayTexture(n = 14) {
   const g = x.createRadialGradient(0, 0, 0, 0, 0, 120); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
   x.fillStyle = g; x.fillRect(-256, -256, 512, 512);
   return new THREE.CanvasTexture(c);
+}
+
+// Fine knit/weave bump for clothes
+let fabricT;
+export function fabricBump() {
+  if (fabricT) return fabricT;
+  const c = canvas(128, 128), x = c.getContext('2d'), img = x.createImageData(128, 128), N = makeNoise(77);
+  for (let i = 0; i < 128 * 128; i++) { const px = i % 128, py = (i / 128) | 0; const v = 128 + Math.sin(px * 1.6) * 30 * Math.sin(py * 0.8) + N.n2(px / 6, py / 6) * 50; img.data.set([v, v, v, 255], i * 4); }
+  x.putImageData(img, 0, 0);
+  fabricT = new THREE.CanvasTexture(c); fabricT.wrapS = fabricT.wrapT = THREE.RepeatWrapping; fabricT.repeat.set(6, 6);
+  return fabricT;
 }

@@ -2,6 +2,7 @@
 // Collision is 2.5D: XZ boxes with a top height. Anything with a top below your feet + STEP can be stood on.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { toon, inked, Character } from './characters.js';
 import { PRESETS } from './data.js';
 import { brickTexture, asphaltTexture, paveTexture, grassTexture, signTexture, windowTexture, graffitiTexture, crateTexture, stripeTexture, radialTexture } from './textures.js';
@@ -15,6 +16,8 @@ export class GameMap {
     this.group = new THREE.Group(); this.colliders = []; this.q = quality; this.mat = {};
     this.pads = []; this.pickupSpots = []; this.animated = [];
     this.build();
+    this.extras();
+    this.mergeStatic();
     this.buildWaypoints();
   }
   M(key, make) { return this.mat[key] ??= make(); }
@@ -39,7 +42,7 @@ export class GameMap {
       vertexShader: `varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
       fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 bot; varying vec3 vP; void main(){ float h = vP.y; vec3 c = h > 0.12 ? mix(mid, top, smoothstep(0.12, 0.75, h)) : mix(bot, mid, smoothstep(-0.05, 0.12, h)); gl_FragColor = vec4(c,1.); }`,
     }));
-    sky.renderOrder = -1; G.add(sky);
+    sky.renderOrder = -1; sky.userData.dynamic = true; G.add(sky);
     const sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: radialTexture('rgba(255,240,200,1)', 'rgba(255,190,120,0)'), fog: false, depthWrite: false }));
     sun.scale.setScalar(70); sun.position.set(160, 70, -220); G.add(sun);
     const cloudMat = std(0xffffff, { roughness: 1, emissive: 0x6070a0, emissiveIntensity: 0.3 });
@@ -119,7 +122,7 @@ export class GameMap {
   }
   beacon(x, z) {
     for (let i = 0; i < 8; i++) this.mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.3, 12), this.M(i % 2 ? 'bk' : 'wt', () => std(i % 2 ? 0x111111 : 0xffffff)), x, 0.15 + i * 0.3, z, { shadow: false });
-    const globe = this.mesh(new THREE.SphereGeometry(0.2, 16, 12), this.M('beacon', () => glow(2.4, 1.3, 0.1)), x, 2.55, z, { shadow: false });
+    const globe = this.mesh(new THREE.SphereGeometry(0.2, 16, 12), this.M('beacon', () => glow(2.4, 1.3, 0.1)), x, 2.55, z, { shadow: false }); globe.userData.dynamic = true;
     this.animated.push(t => { globe.visible = Math.sin(t * 4) > -0.3; });
     this.collider(x - 0.1, x + 0.1, z - 0.1, z + 0.1, 2.7);
   }
@@ -169,7 +172,7 @@ export class GameMap {
       const w = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.8), (f * 6 + i) % 5 === 0 ? litMat : winMat); w.position.set(x0 - 0.02, y, z); w.rotation.y = -Math.PI / 2; this.group.add(w);
       if (f > 0 && i % 2 === 0) this.box(0.8, 0.9, 2.6, balc, x0 - 0.4, y - 1.25, z + 1.7, { collide: false });
     }
-    const red = this.mesh(new THREE.SphereGeometry(0.4, 10, 8), glow(3, 0.2, 0.2), cx, h + 0.4, cz, { shadow: false });
+    const red = this.mesh(new THREE.SphereGeometry(0.4, 10, 8), glow(3, 0.2, 0.2), cx, h + 0.4, cz, { shadow: false }); red.userData.dynamic = true;
     this.animated.push(t => { red.visible = Math.sin(t * 2.5) > 0; });
   }
   shop(x0, x1, z0, z1, name, bg, fg, sub, glowC) {
@@ -297,11 +300,11 @@ export class GameMap {
     this.addPad(x, z, 1.05, 0.6, 14, mat);
   }
   addPad(x, z, r, h, power, mesh) {
-    const pad = { x, z, r, h, power, mesh, squash: 0 };
+    const pad = { x, z, r, h, power, mesh, squash: 0 }; mesh.userData.dynamic = true;
     this.pads.push(pad);
     this.colliders.push({ minX: x - r * 0.8, maxX: x + r * 0.8, minZ: z - r * 0.8, maxZ: z + r * 0.8, h, pad });
     const ring = new THREE.Mesh(new THREE.RingGeometry(r * 0.75, r * 0.95, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 1.8, 2.4), transparent: true, opacity: 0.7, depthWrite: false }));
-    ring.rotation.x = -Math.PI / 2; ring.position.set(x, h + 0.03, z); this.group.add(ring);
+    ring.rotation.x = -Math.PI / 2; ring.position.set(x, h + 0.03, z); ring.userData.dynamic = true; this.group.add(ring);
     this.animated.push(t => { const s = 1 + Math.sin(t * 4) * 0.08; ring.scale.set(s, s, s); ring.material.opacity = 0.45 + Math.sin(t * 4) * 0.25; });
   }
   statue(x, z) {
@@ -343,6 +346,114 @@ export class GameMap {
     this.box(0.06, 0.06, z1 - z0, m, x, 1.0, (z0 + z1) / 2, { collide: false });
     for (let z = z0; z <= z1; z += 0.3) this.box(0.04, 1.1, 0.04, m, x, 0, z, { collide: false, shadow: false });
     this.collider(x - 0.05, x + 0.05, z0, z1, 1.1);
+  }
+  // ---------- V3 dressing ----------
+  blob(x, z, w, d, y = 0.03, k = 0.5) { // soft contact shadow so props sit on the ground
+    const m = this.M('blob' + k, () => new THREE.MeshBasicMaterial({ map: radialTexture('rgba(0,0,0,1)', 'rgba(0,0,0,0)'), transparent: true, opacity: k, depthWrite: false }));
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), m); p.rotation.x = -Math.PI / 2; p.position.set(x, y, z); p.renderOrder = 1; this.group.add(p);
+  }
+  extras() {
+    // contact shadows
+    [[-2.3, -9, 3.4, 11.5], [2.1, 10.3, 2.6, 5.2], [-2.5, 18.2, 2.6, 5.2], [2.4, -22, 2.6, 5.2], [5.1, 2.6, 1.6, 1.6], [-5.7, 24.5, 3, 5.5], [14, 0, 3.4, 3.4]].forEach(([x, z, w, d]) => this.blob(x, z, w, d, 0.075));
+    [[10, -6.5], [18.5, -7], [10.2, 6.8], [19.2, 7.2]].forEach(([x, z]) => this.blob(x, z, 4.2, 4.2, 0.05, 0.35));
+    // string lights criss-crossing the street (bloom candy)
+    this.stringLights(-6.9, -24, 6.9, -20, 6.2); this.stringLights(-6.9, -4, 6.9, -8, 6.0); this.stringLights(-6.9, 14, 6.9, 18, 6.3);
+    // market stall
+    this.stall(5.5, -27.5);
+    // city bikes
+    [13.6, 14.6, 15.6].forEach((z, i) => this.bike(-5.9, z, [0xd8203a, 0x1238c9, 0xd8203a][i]));
+    this.collider(-6.4, -5.4, 13.1, 16.1, 1.0);
+    // cones, puddles, manholes
+    [[-1.2, -16.5], [-0.6, -17.2], [3.2, 4.2], [2.6, 15.8], [-3.2, 26]].forEach(([x, z]) => this.cone(x, z));
+    [[1.2, -14, 2.2, 1.2], [-1.8, 7, 1.6, 0.9], [2.6, 23, 2.4, 1.3], [-0.5, -27, 1.8, 1]].forEach(([x, z, w, d]) => this.puddle(x, z, w, d));
+    [[0, -18], [0, 6], [-1.5, 24]].forEach(([x, z]) => this.manhole(x, z));
+    this.barber(-6.98, -10.2);
+    this.skyline();
+  }
+  stringLights(x0, z0, x1, z1, h) {
+    const a = new THREE.Vector3(x0, h, z0), b = new THREE.Vector3(x1, h, z1), mid = a.clone().lerp(b, 0.5); mid.y -= 1.2;
+    const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
+    this.mesh(new THREE.TubeGeometry(curve, 24, 0.012, 4, false), this.M('wire', () => std(0x111111)), 0, 0, 0, { shadow: false });
+    const n = 22, cols = [[2.6, 1.9, 0.9], [2.8, 0.6, 1.6], [0.5, 2.0, 2.8], [2.6, 1.9, 0.9], [2.2, 2.6, 0.6]];
+    const inst = new THREE.InstancedMesh(new THREE.SphereGeometry(0.075, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }), n);
+    const m4 = new THREE.Matrix4(), c = new THREE.Color();
+    for (let i = 0; i < n; i++) { const p = curve.getPoint((i + 0.5) / n); m4.makeTranslation(p.x, p.y - 0.08, p.z); inst.setMatrixAt(i, m4); c.setRGB(...cols[i % cols.length]); inst.setColorAt(i, c); }
+    inst.userData.dynamic = true; this.group.add(inst);
+  }
+  stall(x, z) {
+    const wood = this.M('stallw', () => std(0x8a5a2b)), cloth = std(0xffffff, { map: stripeTexture('#1d8b4a', '#ffffff') });
+    this.box(1.6, 0.9, 3.0, wood, x, 0, z, { round: 0.04 });
+    [[-0.7, -1.4], [-0.7, 1.4], [0.7, -1.4], [0.7, 1.4]].forEach(([dx, dz]) => this.box(0.06, 2.4, 0.06, this.M('pole', () => std(0x23262e)), x + dx, 0, z + dz, { collide: false }));
+    const awn = this.mesh(new THREE.BoxGeometry(1.9, 0.06, 3.4), cloth, x, 2.4, z); awn.rotation.z = -0.18;
+    const fruit = [[0xff8a1a, 0.07], [0xd8203a, 0.065], [0x6cc04a, 0.07], [0xffd23a, 0.06]];
+    fruit.forEach(([col, r], i) => { const m = std(col, { roughness: 0.45 }); for (let j = 0; j < 14; j++) this.mesh(new THREE.SphereGeometry(r, 10, 8), m, x - 0.45 + (j % 4) * 0.28 + Math.random() * 0.05, 0.96 + Math.random() * 0.05, z - 1.2 + i * 0.75 + Math.floor(j / 4) * 0.16, { shadow: false }); });
+    this.blob(x, z, 2.2, 3.6, 0.075);
+  }
+  bike(x, z, col) {
+    const g = new THREE.Group(), frame = std(col, { roughness: 0.35, metalness: 0.4 }), tyre = this.M('tyre', () => std(0x151515));
+    [-0.5, 0.5].forEach(dz => { const w = new THREE.Mesh(new THREE.TorusGeometry(0.33, 0.035, 8, 24), tyre); w.position.set(0, 0.36, dz); w.rotation.y = Math.PI / 2; g.add(w); });
+    const bar = (ax, ay, az, bx, by, bz) => { const a = new THREE.Vector3(ax, ay, az), b = new THREE.Vector3(bx, by, bz); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, a.distanceTo(b), 8), frame); m.position.copy(a).lerp(b, 0.5); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize()); g.add(m); };
+    bar(0, 0.36, -0.5, 0, 0.7, -0.05); bar(0, 0.7, -0.05, 0, 0.36, 0.5); bar(0, 0.36, -0.5, 0, 0.92, -0.45); bar(0, 0.7, -0.05, 0, 0.95, 0.35);
+    const seat = new THREE.Mesh(new RoundedBoxGeometry(0.12, 0.05, 0.25, 2, 0.02), this.M('seat2', () => std(0x111111))); seat.position.set(0, 0.98, 0.32); g.add(seat);
+    const hb = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 8), this.M('chrome', () => std(0xdddddd, { metalness: 1, roughness: 0.2 }))); hb.rotation.z = Math.PI / 2; hb.position.set(0, 0.95, -0.45); g.add(hb);
+    g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    g.position.set(x, 0, z); g.rotation.y = 0.12; this.group.add(g);
+  }
+  cone(x, z) {
+    this.mesh(new THREE.ConeGeometry(0.22, 0.7, 20), this.M('cone', () => std(0xff6a00, { roughness: 0.5 })), x, 0.38, z);
+    this.mesh(new THREE.CylinderGeometry(0.115, 0.16, 0.12, 20), this.M('coneb', () => std(0xffffff, { roughness: 0.4 })), x, 0.4, z, { shadow: false });
+    this.mesh(new RoundedBoxGeometry(0.5, 0.05, 0.5, 2, 0.02), this.M('conebase', () => std(0x222222)), x, 0.03, z);
+  }
+  puddle(x, z, w, d) {
+    const m = this.M('puddle', () => new THREE.MeshStandardMaterial({ color: 0x0c1430, roughness: 0.02, metalness: 0.9, envMapIntensity: 1.6 }));
+    const p = new THREE.Mesh(new THREE.CircleGeometry(0.5, 32), m); p.scale.set(w, d, 1); p.rotation.x = -Math.PI / 2; p.position.set(x, 0.015, z); p.receiveShadow = true; this.group.add(p);
+  }
+  manhole(x, z) {
+    const m = this.M('manhole', () => std(0x2a2c33, { metalness: 0.6, roughness: 0.5 }));
+    const p = new THREE.Mesh(new THREE.CircleGeometry(0.42, 28), m); p.rotation.x = -Math.PI / 2; p.position.set(x, 0.016, z); p.receiveShadow = true; this.group.add(p);
+  }
+  barber(fx, z) {
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.0), glow(1.5, 1.35, 1.05)); win.position.set(fx + 0.11, 1.25, z); win.rotation.y = Math.PI / 2; this.group.add(win);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.7), new THREE.MeshBasicMaterial({ map: signTexture('FADEZ BARBERS', { bg: '#0b1a5e', fg: '#3de0ff', glow: '#3de0ff', sub: 'SKIN FADES · BEARDS · LINE-UPS' }), color: new THREE.Color(1.5, 1.5, 1.5) }));
+    sign.position.set(fx + 0.15, 2.65, z); sign.rotation.y = Math.PI / 2; this.group.add(sign);
+    const poleTex = stripeTexture('#e8202e', '#ffffff'); poleTex.repeat.set(1, 3);
+    const pole = this.mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.9, 20), new THREE.MeshBasicMaterial({ map: poleTex, color: new THREE.Color(1.4, 1.4, 1.4) }), fx + 0.25, 1.7, z + 1.6, { shadow: false });
+    [1.22, 2.18].forEach(y => this.mesh(new THREE.SphereGeometry(0.13, 14, 10), this.M('chrome', () => std(0xdddddd, { metalness: 1, roughness: 0.2 })), fx + 0.25, y, z + 1.6, { shadow: false }));
+    this.animated.push(t => { poleTex.offset.y = -t * 0.6; });
+  }
+  skyline() {
+    const haze = new THREE.MeshBasicMaterial({ color: 0x7f97d8, fog: false }), haze2 = new THREE.MeshBasicMaterial({ color: 0x9db0e6, fog: false });
+    const add = (g, m, x, y, z) => { const o = new THREE.Mesh(g, m); o.position.set(x, y, z); o.userData.dynamic = true; this.group.add(o); return o; };
+    add(new THREE.ConeGeometry(16, 120, 4), haze, -70, 60, -190).rotation.y = 0.4; // the Shard
+    const gh = add(new THREE.SphereGeometry(14, 20, 16), haze, 45, 34, -200); gh.scale.y = 2.6; // the Gherkin
+    add(new THREE.CylinderGeometry(3, 4, 95, 12), haze2, -140, 47, -130); add(new THREE.CylinderGeometry(9, 9, 6, 16), haze2, -140, 88, -130); // BT Tower
+    [[-30, 40, 18], [10, 55, 16], [80, 46, 20], [120, 30, 24], [-100, 36, 20], [160, 26, 30], [-180, 28, 30]].forEach(([x, h, w]) => add(new THREE.BoxGeometry(w, h, w), haze2, x, h / 2, -230));
+  }
+  // Merge every static mesh into one mesh per material: hundreds of draw calls → a few dozen. Big win on phones.
+  mergeStatic() {
+    this.group.updateMatrixWorld(true);
+    const buckets = new Map(), victims = [];
+    this.group.traverse(o => {
+      if (!o.isMesh || o.isInstancedMesh || o.userData.dynamic) return;
+      for (let p = o.parent; p && p !== this.group; p = p.parent) if (p.userData.dynamic) return;
+      const key = o.material.uuid + '|' + (o.castShadow ? 1 : 0) + (o.receiveShadow ? 1 : 0) + '|' + o.renderOrder;
+      let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      for (const n of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(n)) g.deleteAttribute(n);
+      if (!g.attributes.normal) g.computeVertexNormals();
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      g.applyMatrix4(o.matrixWorld);
+      if (o.matrixWorld.determinant() < 0) { const idx = g.attributes.position; for (let i = 0; i < idx.count; i += 3) { /* flip winding */ for (const a of ['position', 'normal', 'uv']) { const at = g.attributes[a], n = at.itemSize; for (let k = 0; k < n; k++) { const t = at.array[(i + 1) * n + k]; at.array[(i + 1) * n + k] = at.array[(i + 2) * n + k]; at.array[(i + 2) * n + k] = t; } } } }
+      if (!buckets.has(key)) buckets.set(key, { mat: o.material, cast: o.castShadow, recv: o.receiveShadow, ro: o.renderOrder, geos: [] });
+      buckets.get(key).geos.push(g); victims.push(o);
+    });
+    victims.forEach(o => o.parent?.remove(o));
+    let n = 0;
+    buckets.forEach(b => {
+      const geo = mergeGeometries(b.geos, false); if (!geo) return;
+      const m = new THREE.Mesh(geo, b.mat); m.castShadow = b.cast; m.receiveShadow = b.recv; m.renderOrder = b.ro; m.matrixAutoUpdate = false;
+      this.group.add(m); n++;
+    });
+    this.drawCalls = n;
   }
   update(t) {
     this.animated.forEach(f => f(t));

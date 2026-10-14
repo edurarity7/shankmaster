@@ -49,7 +49,7 @@ export class Thumbs {
     this.cam.position.set(0.15, F[0] + 0.1, F[1] + 0.2); this.cam.lookAt(0, F[0], 0); this.cam.updateProjectionMatrix();
     this.r.render(this.scene, this.cam);
     const url = this.r.domElement.toDataURL('image/png');
-    this.scene.remove(g); this.cam.fov = 22;
+    this.scene.remove(g); this.cam.fov = 22; c.dispose();
     this.cache.set(key, url); return url;
   }
   // head-and-shoulders portrait of an outfit
@@ -63,7 +63,7 @@ export class Thumbs {
     this.cam.position.set(0.25, 1.75, 2.4); this.cam.lookAt(0, 1.45, 0); this.cam.updateProjectionMatrix();
     this.r.render(this.scene, this.cam);
     const url = this.r.domElement.toDataURL('image/png');
-    this.scene.remove(g); this.cam.fov = 22;
+    this.scene.remove(g); this.cam.fov = 22; c.dispose();
     this.cache.set(key, url); return url;
   }
 }

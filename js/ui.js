@@ -4,6 +4,7 @@ import {
   rollItem, rollRarity, equippedItem, RANKS, DRIP, SLOTS, SKIN_TONES, DAILY, xpFor, levelReward, rollDrip, today,
 } from './data.js';
 import * as A from './audio.js';
+import { rankEmblem } from './emblems.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -39,8 +40,9 @@ const HINTS = [
   { id: 'look', touch: 'Drag the <b>right side</b> to look', desk: '<b>Mouse</b> to look around', icon: '👉', hx: '6px', hy: '0px' },
   { id: 'attack', touch: '<b>Tap</b> or <b>swipe</b> to shank', desk: '<b>Left click</b> to shank', icon: '👆', hy: '-5px' },
   { id: 'jump', touch: 'Tap <b>JUMP</b> — climb crates & cars', desk: '<b>Space</b> to jump — climb crates & cars', icon: '⤒', hy: '-6px' },
-  { id: 'dash', touch: '<b>Swipe ← ←</b> quick to dash-dodge', desk: '<b>Double-tap A/D/S</b> or <b>Q</b> to dash', icon: '⇇', hx: '-8px', hy: '0px' },
-  { id: 'sprint', touch: '<b>Swipe ↑ ↑</b> to sprint', desk: 'Hold <b>Shift</b> to sprint', icon: '⇈', hy: '-8px' },
+  { id: 'dash', touch: '<b>Double-swipe</b> right side to dash-dodge', desk: '<b>Double-tap A/D/S</b> or <b>Q</b> to dash', icon: '⇇', hx: '-8px', hy: '0px' },
+  { id: 'sprint', touch: 'Push the stick <b>all the way up</b> to sprint', desk: 'Hold <b>Shift</b> to sprint', icon: '⇈', hy: '-8px' },
+  { id: 'inspect', touch: 'Tap <b>✦</b> top-right to flex your knife', desk: 'Press <b>F</b> to inspect your knife', icon: '✦', hy: '-4px' },
 ];
 
 export class UI {
@@ -60,6 +62,7 @@ export class UI {
     tapBtn('#jumpBtn', () => app.input.emit('jump'));
     tapBtn('#dashBtn', () => app.input.emit('dash', { dir: 'auto' }));
     tapBtn('#finBtn', () => app.input.emit('double'));
+    tapBtn('#inspectBtn', () => app.input.emit('inspect'));
     $('#reveal').addEventListener('pointerdown', e => { if (e.target.closest('button')) return; app.reveal.tap(); });
     if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
   }
@@ -71,6 +74,31 @@ export class UI {
   }
   overlay(name, on) { $('#' + name).classList.toggle('show', on); }
   gToast(msg) { const t = $('#gToast'); t.innerHTML = msg; t.classList.add('on'); clearTimeout(this._gt); this._gt = setTimeout(() => t.classList.remove('on'), 1800); }
+  // ---- dopamine explosions (DOM confetti / coins / shockwaves) ----
+  burst(x, y, colors = ['#ffcc33', '#ff3ddc', '#3de0ff', '#ffffff', '#3ee87a'], n = 60, power = 1, coins = false) {
+    const L = $('#fxLayer'), kinds = ['sq', 'sq', 'ci', 'st'];
+    for (let i = 0; i < n; i++) {
+      const el = document.createElement('i'), coin = coins && i % 3 === 0;
+      el.className = 'cf ' + (coin ? 'cn' : kinds[i % kinds.length]); if (!coin) el.style.background = colors[i % colors.length];
+      L.append(el);
+      const a = Math.random() * Math.PI * 2, sp = (140 + Math.random() * 320) * power, dx = Math.cos(a) * sp, dy = Math.sin(a) * sp - 120 * power, rot = (Math.random() - 0.5) * 1080;
+      const dur = 900 + Math.random() * 900;
+      el.animate([
+        { transform: `translate(${x}px, ${y}px) rotate(0) scale(${0.6 + Math.random() * 0.8})`, opacity: 1 },
+        { transform: `translate(${x + dx}px, ${y + dy}px) rotate(${rot * 0.6}deg) scale(1)`, opacity: 1, offset: 0.35 },
+        { transform: `translate(${x + dx * 1.2}px, ${y + dy + 420 + Math.random() * 300}px) rotate(${rot}deg) scale(.8)`, opacity: 0 },
+      ], { duration: dur, easing: 'cubic-bezier(.15,.7,.4,1)' }).onfinish = () => el.remove();
+    }
+  }
+  shock(x, y, color = '#ffcc33', size = 520) {
+    const el = document.createElement('i'); el.className = 'shock'; el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = el.style.height = size + 'px'; el.style.borderColor = color;
+    $('#fxLayer').append(el);
+    el.animate([{ transform: 'translate(-50%,-50%) scale(.1)', opacity: 1, borderWidth: '14px' }, { transform: 'translate(-50%,-50%) scale(1)', opacity: 0, borderWidth: '2px' }], { duration: 650, easing: 'cubic-bezier(.2,.8,.3,1)' }).onfinish = () => el.remove();
+  }
+  celebrate(color = '#ffcc33', big = false) {
+    const x = innerWidth / 2, y = innerHeight * 0.42;
+    this.shock(x, y, color, big ? 900 : 520); this.burst(x, y, [color, '#ffcc33', '#ffffff', '#3de0ff'], big ? 140 : 70, big ? 1.4 : 1, big); A.pop(); if (big) A.coinShower(16);
+  }
   flash() { const f = $('#flash'); f.classList.remove('on'); void f.offsetWidth; f.classList.add('on'); }
 
   // ---------- LOBBY ----------
@@ -96,7 +124,7 @@ export class UI {
     $('#coins').textContent = fmt(profile.coins);
     $('#lvlNum').textContent = profile.level;
     $('#xpRing').style.strokeDashoffset = 94.2 * (1 - profile.xp / xpFor(profile.level));
-    $('#pcRank').textContent = r.name; $('#pcRank').style.color = r.color;
+    $('#pcRank').innerHTML = `${rankEmblem(r.idx, 18)}${r.name}`; $('#pcRank').style.color = r.color;
     const badge = (id, n) => { const b = $(id); b.classList.toggle('on', !!n); if (typeof n === 'number' || typeof n === 'string') b.textContent = n; };
     badge('#chestBadge', profile.chests || 0); $('#chestBtn').classList.toggle('has', profile.chests > 0);
     badge('#dailyBadge', profile.daily.last !== today() ? '!' : 0);
@@ -156,7 +184,7 @@ export class UI {
       b.onclick = () => {
         if (profile.coins < d.price) return;
         profile.coins -= d.price; profile.drip.push(id); profile.outfit[d.slot] = id; save();
-        A.reveal(RARITY_ORDER.indexOf(d.rarity)); vibe([20, 30, 40]); this.flash(); this.gToast(`🔥 <b>${d.name}</b> copped & equipped`);
+        A.reveal(RARITY_ORDER.indexOf(d.rarity)); vibe([20, 30, 40]); this.flash(); this.celebrate(rc(d.rarity), d.rarity === 'gold'); this.gToast(`🔥 <b>${d.name}</b> copped & equipped`);
         this.app.loadoutChanged(); this.app.menu.emote(); this.rerender(); this.refreshLobby();
       };
       row.append(b);
@@ -217,6 +245,8 @@ export class UI {
     const eqb = h(`<button class="btn small ${eq ? '' : 'green'}" ${eq ? 'disabled' : ''}>${eq ? 'EQUIPPED' : 'EQUIP'}</button>`);
     eqb.onclick = () => { profile.equipped.item = it.id; save(); A.claim(); vibe(15); this.app.loadoutChanged(); this.renderLocker(); };
     row.append(eqb);
+    const insp = h(`<button class="btn small">✦ INSPECT</button>`); insp.onclick = () => { this.app.menu.inspect(); };
+    row.append(insp);
     if (!eq && profile.inventory.length > 1) {
       const sell = h(`<button class="btn small ghost">SELL ${RARITY[r].sell}</button>`);
       sell.onclick = () => this.confirm(`Sell <b>${itemName(it)}</b> for ${RARITY[r].sell} coins?`, () => { A.coin(); profile.coins += RARITY[r].sell; profile.inventory = profile.inventory.filter(i => i.id !== it.id); this.sel = null; save(); this.renderLocker(); this.refreshLobby(); });
@@ -228,7 +258,7 @@ export class UI {
     el.innerHTML = `<div class="detail"><div style="font-size:40px">${f.icon}</div><div class="dt"><h4>${f.name}</h4><div class="rar" style="color:${rc(f.rarity)}">${RARITY[f.rarity].short} FINISHER</div><div class="meta">${f.desc} Double tap when they're under 40 HP.</div><div class="row"></div></div></div>`;
     const b = owned ? h(`<button class="btn small ${eq ? '' : 'green'}" ${eq ? 'disabled' : ''}>${eq ? 'EQUIPPED' : 'EQUIP'}</button>`) : h(`<button class="btn gold small" ${profile.coins < f.price ? 'disabled' : ''}><b class="coin" style="width:14px;height:14px;vertical-align:-2px"></b> ${fmt(f.price)}</button>`);
     b.onclick = () => {
-      if (!owned) { if (profile.coins < f.price) return; profile.coins -= f.price; profile.finishers.push(id); A.reveal(RARITY_ORDER.indexOf(f.rarity)); this.flash(); this.gToast(`💀 <b>${f.name}</b> unlocked`); } else A.claim();
+      if (!owned) { if (profile.coins < f.price) return; profile.coins -= f.price; profile.finishers.push(id); A.reveal(RARITY_ORDER.indexOf(f.rarity)); this.flash(); this.celebrate(rc(f.rarity)); this.gToast(`💀 <b>${f.name}</b> unlocked`); } else A.claim();
       profile.equipped.finisher = id; save(); this.rerender(); this.refreshLobby();
     };
     el.querySelector('.row').append(b);
@@ -249,7 +279,7 @@ export class UI {
       const el = h(`<div class="quest ${done && !q.claimed ? 'done' : ''} ${q.claimed ? 'claimed' : ''}"><div class="qt"><b>${q.text}</b><div class="qbar"><i style="width:${Math.min(1, q.prog / q.goal) * 100}%"></i></div><small>${Math.min(q.prog, q.goal)} / ${q.goal} · <b class="coin" style="width:14px;height:14px;vertical-align:-2px"></b> ${q.coins} · ⭐ ${q.xp} XP</small></div></div>`);
       if (done && !q.claimed) {
         const c = h(`<button class="btn green small">CLAIM</button>`);
-        c.onclick = () => { q.claimed = true; profile.coins += q.coins; const lv = this.app.addXp(q.xp); save(); A.claim(); vibe([15, 20, 30]); this.flash(); this.gToast(`+${q.coins} <b class="coin" style="width:14px;height:14px;vertical-align:-2px"></b>  +${q.xp} XP`); this.renderPass(); this.refreshLobby(); if (lv.length) this.levelUp(lv); };
+        c.onclick = () => { q.claimed = true; profile.coins += q.coins; const lv = this.app.addXp(q.xp); save(); A.claim(); vibe([15, 20, 30]); this.flash(); this.burst(innerWidth / 2, innerHeight * 0.5, undefined, 50, 1, true); this.gToast(`+${q.coins} <b class="coin" style="width:14px;height:14px;vertical-align:-2px"></b>  +${q.xp} XP`); this.renderPass(); this.refreshLobby(); if (lv.length) this.levelUp(lv); };
         el.append(c);
       } else if (q.claimed) el.append(h('<span style="font-size:22px">✅</span>'));
       $('#qList').append(el);
@@ -259,11 +289,11 @@ export class UI {
   // ---------- RANK ----------
   renderRank() {
     const r = rankOf(profile), games = profile.wins + profile.losses;
-    $('#rankBody').innerHTML = `<div class="rank-hero"><div class="emblem" style="background:linear-gradient(160deg, ${r.color}, #0a1f6e)">${r.placement ? '?' : r.name[0]}</div><h2 style="color:${r.color}">${r.name.toUpperCase()}</h2>
+    $('#rankBody').innerHTML = `<div class="rank-hero"><div class="emblem-big">${rankEmblem(r.idx, 150)}</div><h2 style="color:${r.color}">${r.name.toUpperCase()}</h2>
       <small>${r.placement ? `${r.placement} placement match${r.placement > 1 ? 'es' : ''} to go` : `${(r.pct * 100).toFixed(1)}% win rate`}</small></div>
       <div class="stats"><div><b>${profile.wins}</b><small>WINS</small></div><div><b>${profile.losses}</b><small>LOSSES</small></div><div><b>${games ? Math.round(r.pct * 100) : 0}%</b><small>WIN RATE</small></div></div>
       <div class="stats"><div><b>${profile.best}</b><small>BEST STREAK</small></div><div><b>${profile.level}</b><small>LEVEL</small></div><div><b>${profile.inventory.length}</b><small>KNIVES</small></div></div>
-      <h3>🏆 TIERS</h3><div class="ladder">${[...RANKS].reverse().map(t => `<div class="${t.name === r.name ? 'me' : ''}"><i style="background:${t.color}"></i>${t.name}<span>${Math.round(t.min * 100)}%+</span></div>`).join('')}</div>
+      <h3>🏆 TIERS</h3><div class="ladder">${RANKS.map((t, i) => [t, i]).reverse().map(([t, i]) => `<div class="${t.name === r.name ? 'me' : ''}">${rankEmblem(i, 58)}<b style="color:${t.color}">${t.name}</b><span>${Math.round(t.min * 100)}%+ win rate</span></div>`).join('')}</div>
       ${profile.history.length ? `<h3>🕑 RECENT</h3>${profile.history.slice(0, 8).map(m => `<div class="hist"><span class="${m.win ? 'w' : 'l'}">${m.win ? 'WIN' : 'LOSS'} ${m.score.join('–')}</span><span>vs ${m.opp}</span></div>`).join('')}` : ''}`;
   }
 
@@ -277,10 +307,11 @@ export class UI {
     this.setTierLabel(0); $('#rvSub').textContent = 'Tap the chest to power it up!';
     this.app.startReveal(won, tier, {
       onReady: () => $('#rvTap').classList.add('on'),
-      onTier: (i) => { this.setTierLabel(i); this.flash(); },
+      onTier: (i) => { this.setTierLabel(i); this.flash(); const c = rc(RARITY_ORDER[i]); this.shock(innerWidth / 2, innerHeight * 0.55, c, 420 + i * 80); this.burst(innerWidth / 2, innerHeight * 0.55, [c, '#ffffff'], 30 + i * 15, 0.8); },
       onOpen: () => {
         $('#rvTap').classList.remove('on'); this.flash(); $('#rvSub').textContent = '';
-        setTimeout(() => this.spinReel(won, tier), 650);
+        const c = rc(RARITY_ORDER[tier]); this.shock(innerWidth / 2, innerHeight * 0.55, c, 900); this.burst(innerWidth / 2, innerHeight * 0.55, [c, '#ffffff', '#ffcc33'], 90, 1.3);
+        setTimeout(() => this.spinReel(won, tier), 900);
       },
     });
   }
@@ -312,6 +343,7 @@ export class UI {
     const r = itemRarity(it);
     $('#reelWrap').classList.remove('on');
     this.app.reveal.showKnife(); this.flash();
+    this.celebrate(rc(r), tier >= 3); if (tier >= 4) setTimeout(() => this.celebrate('#ffc21a', true), 450);
     A.reveal(tier); vibe(tier >= 3 ? [40, 60, 120] : [30, 40]);
     const c = $('#rvCard'); c.style.setProperty('--r', rc(r));
     c.innerHTML = `<span class="rr">${RARITY[r].short}${tier === 4 ? ' ★' : ''}</span><h2>${KNIVES[it.knife].name}<br><span style="color:${rc(r)}">${SKINS[it.skin].name}</span></h2><p>${wearName(it.float)} · Float ${it.float.toFixed(4)} · Pattern #${it.seed}</p>`;
@@ -336,9 +368,9 @@ export class UI {
       clearInterval(this.mmTimer); A.beep(880, 0.08, 0.25); setTimeout(() => A.beep(1320, 0.15, 0.25), 90); vibe([20, 40, 20]);
       $('#mmTitle').textContent = 'MATCH FOUND!'; $('.radar').style.display = 'none'; $('#mmTime').textContent = ''; $('#mmCancel').style.display = 'none';
       const me = rankOf(profile), T = this.app.thumbs;
-      $('#vs').innerHTML = `<div class="pl me"><img class="av" src="${T.char(profile.outfit)}" alt=""><b>YOU</b><small style="color:${me.color}">${me.name}</small><img class="kn" src="${T.knife(equippedItem(), 200, 100)}" alt=""></div>
+      $('#vs').innerHTML = `<div class="pl me"><img class="av" src="${T.char(profile.outfit)}" alt=""><b>YOU</b><small style="color:${me.color}">${rankEmblem(me.idx, 18)}${me.name}</small><img class="kn" src="${T.knife(equippedItem(), 200, 100)}" alt=""></div>
         <div class="x">VS</div>
-        <div class="pl op"><img class="av" src="${T.char(data.outfit)}" alt=""><b>${data.name}<span class="tag">AI</span></b><small style="color:${data.rank.color}">${data.rank.name}</small><img class="kn" src="${T.knife(data.item, 200, 100)}" alt=""></div>`;
+        <div class="pl op"><img class="av" src="${T.char(data.outfit)}" alt=""><b>${data.name}<span class="tag">AI</span></b><small style="color:${data.rank.color}">${rankEmblem(data.rank.idx ?? 1, 18)}${data.rank.name}</small><img class="kn" src="${T.knife(data.item, 200, 100)}" alt=""></div>`;
       $('#vs').classList.add('show');
     } else { clearInterval(this.mmTimer); this.overlay('mm', false); }
   }
@@ -410,7 +442,14 @@ export class UI {
     r.innerHTML = `<h2 style="color:${res === 'win' ? '#6fb0ff' : res === 'lose' ? '#ff3355' : '#fff'}">${txt}</h2><p>${why}${over ? '' : ` · ${score[0]} – ${score[1]}`}</p>`;
     setTimeout(() => { r.classList.remove('on'); void r.offsetWidth; r.classList.add('on'); }, 650);
     vibe(res === 'win' ? [30, 50, 30] : 80);
+    if (res === 'win') setTimeout(() => { this.burst(innerWidth / 2, innerHeight * 0.42, ['#6fb0ff', '#ffcc33', '#ffffff'], 50, 0.9); A.pop(); }, 650);
   }
+  ping(ang, dist) {
+    const el = document.createElement('div'); el.className = 'ping';
+    el.innerHTML = `<i style="transform:rotate(${-ang * 180 / Math.PI}deg)"><b>▲</b></i><span>${dist}m</span>`;
+    $('#hud').append(el); setTimeout(() => el.remove(), 2200);
+  }
+  killPop() { this.shock(innerWidth / 2, innerHeight * 0.45, '#ffcc33', 600); this.burst(innerWidth / 2, innerHeight * 0.45, ['#ffcc33', '#ff3355', '#ffffff'], 40, 0.9, true); }
   banner(text, color) { const b = $('#banner'); b.textContent = text; b.style.setProperty('--c', color); b.classList.remove('on'); void b.offsetWidth; b.classList.add('on'); }
   toast(text, ms = 800) { const t = $('#toast'); t.textContent = text; t.classList.remove('on'); void t.offsetWidth; t.classList.add('on'); clearTimeout(this._toastT); this._toastT = setTimeout(() => t.classList.remove('on'), ms); }
   floater(text, x, y, cls) {
@@ -440,9 +479,10 @@ export class UI {
     const kf = h(`<div class="kf"><span class="${a === 'You' ? 'me' : 'op'}">${a}</span><img src="${this.app.thumbs.knife(item, 100, 50)}" alt="">${['finisher', 'backstab', 'air'].includes(how) ? `<em>${how.toUpperCase()}</em>` : ''}<span class="${b === 'You' ? 'me' : 'op'}">${b}</span></div>`);
     $('#killfeed').prepend(kf); setTimeout(() => kf.remove(), 6000);
   }
-  joy(j, dx, dy) {
+  joy(j, dx, dy, sprint) {
     const el = $('#joy');
-    if (!j) { el.style.display = 'none'; return; }
+    if (!j) { el.style.display = 'none'; el.classList.remove('sprint'); return; }
+    el.classList.toggle('sprint', !!sprint);
     el.style.display = 'block'; el.style.left = j.x + 'px'; el.style.top = j.y + 'px';
     el.querySelector('i').style.transform = `translate(${dx}px, ${dy}px)`;
     $('#joyGhost').classList.remove('on');
@@ -458,7 +498,7 @@ export class UI {
       <div class="result-actions"><button class="btn ghost" id="homeBtn">HOME</button><button class="btn-play" id="againBtn"><span>PLAY AGAIN</span></button></div>`;
     $('.result-rays').style.display = R.win ? '' : 'none';
     this.overlay('result', true);
-    if (R.win) A.winSting(); else A.loseSting();
+    if (R.win) { A.winSting(); setTimeout(() => this.celebrate('#ffcc33', true), 250); } else A.loseSting();
     const rows = $('#rewRows');
     const row = (icon, label, val, extra = '') => { const e = h(`<div class="rew"><span class="ri">${icon}</span><div class="rt"><small>${label}</small><b>${val}</b>${extra}</div></div>`); rows.append(e); requestAnimationFrame(() => e.classList.add('in')); return e; };
     const steps = [];
@@ -474,8 +514,9 @@ export class UI {
       row('🧰', 'WIN CHEST', R.chestEarned ? 'CHEST EARNED!' : `${profile.winChest} / ${WIN_CHEST_WINS}`, `<div>${pips}</div>`);
       if (R.chestEarned) { A.reveal(3); vibe([30, 40, 60]); }
     });
-    steps.push(() => row(r.placement ? '❔' : '🏆', 'RANK', `<span style="color:${r.color}">${r.name}</span>`, `<small>${r.placement ? `${r.placement} placements left` : `${(r.pct * 100).toFixed(1)}% win rate · ${profile.wins}W ${profile.losses}L`}</small>`));
+    steps.push(() => row(rankEmblem(r.idx, 34), 'RANK', `<span style="color:${r.color}">${r.name}</span>`, `<small>${r.placement ? `${r.placement} placements left` : `${(r.pct * 100).toFixed(1)}% win rate · ${profile.wins}W ${profile.losses}L`}</small>`));
     if (R.questsDone.length) steps.push(() => { row('📜', 'QUEST COMPLETE', R.questsDone.join(', '), '<small>Claim in QUESTS</small>'); A.claim(); });
+    if (R.rankUp) steps.push(() => setTimeout(() => this.rankUp(R.rankUp), 500));
     steps.forEach((f, i) => setTimeout(f, 500 + i * 650));
     $('#againBtn').onclick = () => { A.uiClick(); this.overlay('result', false); this.app.queue(); };
     $('#homeBtn').onclick = () => { A.uiClick(); this.overlay('result', false); this.app.toMenu(); };
@@ -509,13 +550,18 @@ export class UI {
       if (d.type === 'chest') { profile.chests += d.n || 1; msg = `+${d.n || 1} chest${(d.n || 1) > 1 ? 's' : ''} 🧰`; }
       if (d.type === 'drip') { const id = rollDrip('restricted'); if (id) { profile.drip.push(id); msg = `🧥 ${DRIP[id].name}`; } else { profile.coins += 400; msg = '+400 <b class="coin" style="width:14px;height:14px;vertical-align:-2px"></b>'; } }
       profile.daily = { last: today(), day: profile.daily.day + 1 }; save();
-      A.reveal(3); vibe([30, 50, 80]); this.flash(); this.closeModal(); this.gToast(`🎁 ${msg}`); this.refreshLobby();
+      A.reveal(3); vibe([30, 50, 80]); this.flash(); this.closeModal(); this.celebrate('#ffcc33', true); this.gToast(`🎁 ${msg}`); this.refreshLobby();
     };
+  }
+  rankUp(r) {
+    this.modal(`<div class="lvlup"><div class="emblem-big">${rankEmblem(r.idx, 190)}</div><div class="big" style="color:${r.color};font-size:64px">RANK UP!</div><p style="margin:0;font-weight:900">You're now <span style="color:${r.color}">${r.name.toUpperCase()}</span></p></div><div class="row"><button class="btn gold" id="mOk">LET'S GO</button></div>`);
+    A.rankUp(); this.flash(); this.burst(innerWidth / 2, innerHeight * 0.4, [r.color, '#ffcc33', '#ffffff'], 90); vibe([40, 60, 120]);
+    $('#mOk').onclick = () => { this.closeModal(); this.refreshLobby(); };
   }
   levelUp(levels) {
     const lv = levels[levels.length - 1];
     this.modal(`<div class="lvlup"><div class="big">LEVEL ${lv}</div><p>New rewards unlocked</p></div><div class="row"><button class="btn gold" id="mOk">NICE</button></div>`);
-    A.levelUp(); this.flash(); $('#mOk').onclick = () => { this.closeModal(); this.refreshLobby(); };
+    A.levelUp(); this.flash(); this.celebrate('#ffcc33', true); $('#mOk').onclick = () => { this.closeModal(); this.refreshLobby(); };
   }
   settings(inMatch = false) {
     const s = profile.settings, touch = this.app.input.touch;
@@ -525,8 +571,9 @@ export class UI {
       <label>Graphics <select id="sQ"><option value="high">High (bloom)</option><option value="low">Fast</option></select></label>
       <label>Vibration <input type="checkbox" id="sHap" ${s.haptics ? 'checked' : ''}></label>
       <div class="controls-list">${touch
-        ? '<b>Left thumb</b> move · <b>Right drag</b> look · <b>Tap/swipe</b> shank<br><b>Double tap</b> finisher · <b>Swipe ←← →→ ↓↓</b> dash · <b>↑↑</b> sprint<br><b>JUMP</b> button to climb'
+        ? '<b>Left stick</b> move · push <b>fully up</b> or <b>double-flick up</b> to sprint<br><b>Right drag</b> look · <b>Tap/swipe</b> shank · <b>Double tap</b> finisher<br><b>Double-swipe</b> dash · <b>JUMP</b> to climb · <b>✦</b> inspect'
         : '<b>WASD</b> move · <b>Mouse</b> look · <b>Space</b> jump · <b>Shift</b> sprint<br><b>LMB</b> shank · <b>Double-click/E</b> finisher · <b>RMB</b> heavy<br><b>Q</b> or <b>double-tap A/S/D</b> dash · <b>F</b> inspect'}</div>
+      <small style="text-align:center;opacity:.5">Shankmaster v0.3 · test build</small>
       <div class="row">${inMatch ? '<button class="btn red" id="mQuit">FORFEIT</button><button class="btn green" id="mResume">RESUME</button>' : '<button class="btn ghost small" id="mTut">REPLAY TUTORIAL</button><button class="btn green" id="mClose">DONE</button>'}</div>`);
     $('#sQ').value = s.quality;
     $('#sSens').oninput = e => { s.sens = +e.target.value; this.app.input.sens = s.sens; save(); };

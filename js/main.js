@@ -11,6 +11,8 @@ import { MenuStage } from './menu.js';
 import { ChestReveal } from './reveal.js';
 import { Post } from './post.js';
 import { makeEnvScene } from './textures.js';
+import { updateKnifeFX } from './knives.js';
+export const VERSION = 'v0.3';
 import * as A from './audio.js';
 
 const canvas = document.getElementById('gl');
@@ -31,9 +33,9 @@ class App {
     this.scene.fog = new THREE.Fog(0x9fb8f0, 38, 150);
     this.camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.05, 600);
     this.scene.add(new THREE.HemisphereLight(0xcfdcff, 0x5a7a4a, 1.2));
-    const sun = this.sun = new THREE.DirectionalLight(0xffe8c8, 2.6);
-    sun.position.set(18, 30, 12); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 90 });
+    const sun = this.sun = new THREE.DirectionalLight(0xffdcae, 2.9);
+    sun.position.set(30, 30, -42); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+    Object.assign(sun.shadow.camera, { left: -42, right: 42, top: 42, bottom: -42, near: 1, far: 140 });
     sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.03;
     this.scene.add(sun, sun.target);
     this.ui.loading(0.2, 'Building the endz…'); await tick();
@@ -105,7 +107,7 @@ class App {
     this.mmT = setTimeout(() => {
       const r = rankOf(profile), games = profile.wins + profile.losses;
       const diff = games < PLACEMENT_GAMES ? 0.25 + games * 0.05 : Math.max(0.25, Math.min(0.95, 0.15 + r.pct * 0.9));
-      const tier = RANKS[Math.max(0, Math.min(RANKS.length - 1, (r.idx < 0 ? 1 : r.idx) + Math.round(Math.random() * 2 - 1)))];
+      const ti = Math.max(0, Math.min(RANKS.length - 1, (r.idx < 0 ? 1 : r.idx) + Math.round(Math.random() * 2 - 1))), tier = { ...RANKS[ti], idx: ti };
       const opp = { name: botName(), outfit: randomOutfit(), item: rollItem(), rank: tier, difficulty: diff };
       this.ui.mm('found', opp);
       this.mmT = setTimeout(() => { this.ui.mm('hide'); this.startMatch(opp); }, 2300);
@@ -128,6 +130,7 @@ class App {
   }
   finishMatch(win, score, stats, earned, opp) {
     this.input.enabled = false; document.exitPointerLock?.();
+    const rankBefore = rankOf(profile);
     profile.matches = (profile.matches || 0) + 1;
     if (win) { profile.wins++; profile.streak = Math.max(1, profile.streak + 1); } else { profile.losses++; profile.streak = Math.min(-1, profile.streak - 1); }
     profile.best = Math.max(profile.best, profile.streak);
@@ -143,7 +146,8 @@ class App {
     profile.quests.list.forEach(q => { const before = q.prog >= q.goal; q.prog += add[q.stat] || 0; if (!before && q.prog >= q.goal) questsDone.push(q.text); });
     profile.history.unshift({ t: Date.now(), win, score, opp: opp.name }); profile.history.length = Math.min(profile.history.length, 30);
     save();
-    this.ui.showResult({ win, score, stats, coins, xp, levels, levelRewards, levelBefore, xpBefore, chestEarned, questsDone });
+    const rankAfter = rankOf(profile), rankUp = rankAfter.idx > rankBefore.idx ? rankAfter : null;
+    this.ui.showResult({ win, score, stats, coins, xp, levels, levelRewards, levelBefore, xpBefore, chestEarned, questsDone, rankUp });
   }
   pause() {
     if (!this.match || this.paused || this.match.state === 'over') return;
@@ -166,11 +170,20 @@ class App {
     requestAnimationFrame(() => this.loop());
     this.frame(Math.min(0.05, this.clock.getDelta()));
   }
+  // If a phone can't hold ~40fps with bloom for a few seconds, drop to Fast graphics automatically.
+  watchPerf(dt) {
+    if (!this.usePost || window.__test || document.hidden) return;
+    this.perf = (this.perf || 0) * 0.97 + dt * 0.03;
+    this.slowT = this.perf > 1 / 38 ? (this.slowT || 0) + dt : 0;
+    if (this.slowT > 3) { profile.settings.quality = 'low'; save(); this.applyQuality(); this.ui.gToast('⚡ Switched to Fast graphics for smoother play'); }
+  }
   frame(dt) {
     const aspect = innerWidth / innerHeight;
+    this.time = (this.time || 0) + dt; updateKnifeFX(this.time);
     let scene, cam, over = null, overCam = null;
     if (this.mode === 'match' && this.match) {
       if (!this.paused) this.match.update(dt);
+      this.watchPerf(dt);
       scene = this.scene; cam = this.camera;
       if (!this.match.me.dead) { over = this.vm.scene; overCam = this.vm.camera; }
     } else if (this.mode === 'reveal') {
@@ -186,6 +199,13 @@ class App {
   }
 }
 
+// Testers: any crash shows a friendly reload chip instead of a frozen screen.
+let crashShown = false;
+const crash = (msg) => {
+  if (crashShown) return; crashShown = true; console.error(msg);
+  const d = document.createElement('div'); d.className = 'crash'; d.innerHTML = `<b>Something broke 🔪</b><small>${String(msg).slice(0, 120)}</small><button onclick="location.reload()">RELOAD</button>`; document.body.append(d);
+};
+addEventListener('error', e => crash(e.message)); addEventListener('unhandledrejection', e => crash(e.reason?.message || e.reason));
 const app = new App();
 window.__app = app;
 app.init().catch(e => { console.error(e); document.querySelector('#loadHint').textContent = 'Failed to load: ' + e.message; });

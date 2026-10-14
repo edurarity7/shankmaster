@@ -15,7 +15,9 @@ export const KNIVES = {
   butterfly: { name: 'Butterfly',     desc: 'Flips open. Flips around. Flips out.' },
   bayonet:   { name: 'M9 Bayonet',    desc: 'Military spine saw. Heavy and honest.' },
   huntsman:  { name: 'Huntsman',      desc: 'Big clip-point bowie. Says less, does more.' },
-  flip:      { name: 'Flip Knife',    desc: 'Slim drop-point with a thumb hole. Clean.' },
+  flip:      { name: 'Flip Knife',    desc: 'Slim drop-point with a thumb hole. Flicks open.' },
+  talon:     { name: 'Talon',         desc: 'Oversized claw with a brass ring. Pure menace.' },
+  skeleton:  { name: 'Skeleton',      desc: 'Skeletonised handle, paracord wrap. Light and mean.' },
 };
 
 export const SKINS = {
@@ -31,6 +33,9 @@ export const SKINS = {
   bloodweb:   { name: 'Blood Web',     rarity: 'covert' },
   fade:       { name: 'Sunset Fade',   rarity: 'covert' },
   marble:     { name: 'Marble Riot',   rarity: 'covert' },
+  holo:       { name: 'Holo Chrome',   rarity: 'gold', anim: true },
+  lava:       { name: 'Molten',        rarity: 'gold', anim: true },
+  galaxy:     { name: 'Galaxy',        rarity: 'gold', anim: true },
   ruby:       { name: 'Ruby',          rarity: 'gold' },
   sapphire:   { name: 'Sapphire',      rarity: 'gold' },
   emerald:    { name: 'Emerald',       rarity: 'gold' },
@@ -211,12 +216,14 @@ export function rollRarity() {
 export function rollItem(rar = rollRarity()) {
   const skins = Object.keys(SKINS).filter(s => SKINS[s].rarity === rar);
   const knives = Object.keys(KNIVES).filter(k => KNIVES[k].inChest !== false);
-  return makeItem(pick(knives), pick(skins));
+  const it = makeItem(pick(knives), pick(skins));
+  if (Math.random() < 0.15) it.trak = 0; // ShankTrak™ kill counter
+  return it;
 }
 export function makeItem(knife, skin, flt) {
   return { id: Math.random().toString(36).slice(2, 10), knife, skin, float: flt ?? +(Math.pow(Math.random(), 1.6)).toFixed(4), seed: Math.floor(Math.random() * 1000) };
 }
-export const itemName = (it) => `${KNIVES[it.knife].name} | ${SKINS[it.skin].name}`;
+export const itemName = (it) => `${it.trak != null ? 'ShankTrak™ ' : ''}${KNIVES[it.knife].name} | ${SKINS[it.skin].name}`;
 export const itemRarity = (it) => SKINS[it.skin].rarity;
 // A drip item the player doesn't own yet (biased to better rarity), or null.
 export function rollDrip(minRarity = 'restricted') {

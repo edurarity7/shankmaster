@@ -5,6 +5,8 @@ import { Character } from './characters.js';
 import { FINISHERS } from './data.js';
 import { STEP } from './map.js';
 import * as A from './audio.js';
+import { BotBrain } from './bot.js';
+import { save } from './data.js';
 
 const WALK = 2.4, RUN = 5.4, SPRINT = 8.0, DASH_SPEED = 17, DASH_T = 0.2, DASH_IFRAME = 0.18, DASH_CD = 0.8;
 const GRAV = 24, JUMP_V = 7.6, COYOTE = 0.12, JUMP_BUF = 0.14;
@@ -49,15 +51,16 @@ export class Match {
     this.op = new Fighter(true, opponent.outfit, opponent.item, opponent.name);
     this.op.model.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
     scene.add(this.op.model.root);
+    this.brain = new BotBrain(this);
     this.score = [0, 0]; this.round = 0; this.state = 'intro'; this.stateT = 0; this.timeScale = 1; this.hitstop = 0;
-    this.shake = 0; this.fov = 80; this.ai = {}; this.dip = 0; this.camRoll = 0; this.deathCam = 0; this.myCombo = 0; this.myComboT = 0;
+    this.shake = 0; this.fov = 80; this.dip = 0; this.camRoll = 0; this.deathCam = 0; this.myCombo = 0; this.myComboT = 0;
     this.stats = { hits: 0, taken: 0, finishers: 0, backstabs: 0, dashDodges: 0, airHits: 0, pickups: 0, kills: 0, damage: 0 };
     this.earned = 0;
     this.pickups = []; this.pickupGroup = new THREE.Group(); scene.add(this.pickupGroup);
     vm.setLoadout(me.outfit, me.item);
     this.startRound();
   }
-  dispose() { this.scene.remove(this.op.model.root); this.scene.remove(this.pickupGroup); }
+  dispose() { this.op.model.dispose(); this.scene.remove(this.pickupGroup); }
 
   // ---------- rounds ----------
   startRound() {
@@ -67,10 +70,11 @@ export class Match {
     [[this.me, a], [this.op, b]].forEach(([f, s]) => {
       f.reset(); f.pos.set(s.x, this.map.groundAt(s.x, s.z, 5).h, s.z); f.yaw = yawTo(f.pos, { x: 4, z: 0 }); f.pitch = 0; f.model.revive();
     });
-    this.ai = { path: [], pathT: 0, last: null, lastSeen: -99, strafe: 1, decideT: 0, dodgeFor: null, wantAtk: 0, roam: this.map.randomPoint(), heard: 0, stuck: 0 };
+    this.brain.reset();
     this.fx.clear(); this.screen.clear(); this.vm.blood = 0; this.vm.addBlood(0);
     this.vm.play('draw', 0.7); A.draw();
     this.spawnPickups();
+    this.pingT = 0;
     this.state = 'countdown'; this.stateT = 3.2; this.deathCam = 0; this.camRoll = 0; this.timeScale = 1;
     this.ui.roundIntro(this.round, this.score);
     this.time = ROUND_TIME;
@@ -83,6 +87,14 @@ export class Match {
     this.ui.roundResult(winner === this.me ? 'win' : winner ? 'lose' : 'draw', reason, this.score, over);
     if (winner === this.me) { A.winSting(); this.coins(20, 'ROUND'); } else if (winner) A.loseSting();
     this.matchOver = over;
+  }
+  ping() {
+    const me = this.me, op = this.op;
+    if (me.dead || op.dead) return;
+    this.brain.hear?.(me.pos);
+    const ang = Math.atan2(-(op.pos.x - me.pos.x), -(op.pos.z - me.pos.z)) - me.yaw;
+    this.ui.ping?.(ang, Math.round(hdist(me.pos, op.pos)));
+    A.ping?.();
   }
   coins(n, why) { this.earned += n; this.ui.coinPop(n, why); }
 
@@ -139,8 +151,8 @@ export class Match {
     if (this.hitstop > 0) { this.hitstop -= rdt; rdt *= 0.08; }
     const dt = rdt * this.timeScale;
     this.timeScale += (1 - this.timeScale) * Math.min(1, rdt * 1.5);
-    this.input.update();
-    const look = this.input.takeLook();
+    this.input.update(rdt);
+    const look = this.input.takeLook(rdt);
     const me = this.me, op = this.op;
     if (!me.finLock && !me.dead) { me.yaw -= look.x; me.pitch = Math.max(-1.3, Math.min(1.3, me.pitch - look.y)); }
     if (look.x || look.y) this.ui.learn('look');
@@ -149,11 +161,13 @@ export class Match {
       const before = Math.ceil(this.stateT); this.stateT -= rdt; const after = Math.ceil(this.stateT);
       if (after !== before && after > 0) { A.beep(660, 0.1, 0.25); this.ui.countdown(after); }
       if (this.stateT <= 0) { this.state = 'live'; this.ui.countdown('FIGHT!'); A.beep(1320, 0.25, 0.3); A.ambience(true); }
-      events.filter(e => e.type === 'inspect').forEach(() => this.vm.play('inspect', 2.2));
+      events.filter(e => e.type === 'inspect').forEach(() => this.vm.play('inspect', 2.4));
     } else if (this.state === 'live') {
       this.time -= dt;
+      // radar ping keeps rounds snappy: after 20s both sides learn roughly where the other is
+      if (ROUND_TIME - this.time > 20) { this.pingT = (this.pingT ?? 0) - dt; if (this.pingT <= 0) { this.pingT = 10; this.ping(); } }
       this.handleEvents(events);
-      this.bot(dt);
+      this.brain.update(dt);
       if (this.time <= 0) this.endRound(me.hp > op.hp ? me : op.hp > me.hp ? op : null, 'Time');
     } else if (this.state === 'roundEnd') {
       this.stateT -= rdt;
@@ -162,10 +176,10 @@ export class Match {
         else this.startRound();
       }
     }
-    if (this.state !== 'live') this.ai.intent = null;
+    if (this.state !== 'live') this.brain.intent = null;
     const frozen = this.state === 'countdown' || this.state === 'over';
     this.moveFighter(me, dt, frozen ? null : this.myMoveIntent());
-    this.moveFighter(op, dt, frozen ? null : this.ai.intent);
+    this.moveFighter(op, dt, frozen ? null : this.brain.intent);
     this.separate();
     this.tickAttack(me, op, dt); this.tickAttack(op, me, dt);
     this.footsteps(me, dt); this.footsteps(op, dt);
@@ -186,12 +200,8 @@ export class Match {
     const dir = new THREE.Vector3().addScaledVector(f, m.y).addScaledVector(r, m.x);
     let mag = Math.min(1, dir.length());
     if (mag > 0.05) this.ui.learn('move');
-    if (this.input.sprintHeld) { me.sprint = true; me.sprintT = 0.2; }
-    if (me.sprint) {
-      if (m.y < -0.3) me.sprint = false;
-      else if (mag < 0.2) { dir.copy(f); mag = 1; } // sprint mode keeps you running forward ("tap n go")
-      else if (m.y < 0.2) me.sprint = false;
-    }
+    if (this.input.sprintHeld && m.y > 0.2) { if (!me.sprint) { me.sprintAge = 0; this.ui.sprintFx(true); this.ui.learn('sprint'); } me.sprint = true; me.sprintT = Math.max(me.sprintT, 0.25); }
+    if (me.sprint && (m.y < 0.2 || mag < 0.2) && (me.sprintAge || 0) > 0.2) { me.sprint = false; this.ui.sprintFx(false); }
     const base = me.sprint ? SPRINT : (this.input.walk ? WALK : RUN);
     const speed = base * (me.boost > 0 ? 1.25 : 1) * (this.input.joy && !me.sprint ? Math.max(mag, 0.4) : mag);
     return { dir: mag > 0.01 ? dir.normalize() : dir, speed };
@@ -210,7 +220,7 @@ export class Match {
         if (me.atk && !me.atk.hit) { me.atk = null; this.vm.cancel(); }
         me.sprint = true; me.sprintT = 8; me.sprintAge = 0; A.sprintStart(); this.ui.sprintFx(true); this.ui.learn('sprint');
       }
-      else if (e.type === 'inspect' && !me.atk) this.vm.play('inspect', 2.2);
+      else if (e.type === 'inspect' && !me.atk) { this.vm.play('inspect', 2.4); this.ui.learn('inspect'); }
     }
   }
   dash(f, dir) {
@@ -350,8 +360,9 @@ export class Match {
       t.model.kill(back); A.grunt(P, 0.8, true); setTimeout(() => A.thud(P), 450);
       const fall = fwdOf(t.yaw).multiplyScalar(back ? 1.0 : -1.0);
       setTimeout(() => this.fx.pool(t.pos.x + fall.x, t.pos.z + fall.z, t.pos.y), 500);
+      if (f.item.trak != null) { f.item.trak++; save(); this.vm.setTrak(f.item.trak); this.ui.toast(`ShankTrak™ ${f.item.trak}`, 900); }
       this.stats.kills++; this.coins(how === 'finisher' ? 40 : 25, how === 'finisher' ? 'FINISHER' : 'KILL');
-      this.ui.banner(how === 'finisher' ? 'FINISHED' : 'ELIMINATED', '#ffcc33');
+      this.ui.banner(how === 'finisher' ? 'FINISHED' : 'ELIMINATED', '#ffcc33'); this.ui.killPop?.();
     } else {
       A.grunt(null, 0.7, true); setTimeout(() => A.thud(null), 450); this.deathCam = 0.001;
       this.fx.pool(t.pos.x, t.pos.z, t.pos.y);
@@ -468,79 +479,5 @@ export class Match {
       finisher: this.state === 'live' && this.canFinish(me, op), earned: this.earned,
     });
     if (me.hp > 0 && me.hp <= 35 && this.state === 'live') A.heartbeat(1 + (35 - me.hp) / 35);
-  }
-
-  // ---------- bot ----------
-  bot(dt) {
-    const b = this.op, p = this.me, ai = this.ai, D = this.difficulty, now = performance.now() / 1000;
-    ai.intent = null;
-    if (b.dead || b.finLock) return;
-    const dist = hdist(b.pos, p.pos), dy = p.pos.y - b.pos.y;
-    const toP = yawTo(b.pos, p.pos), facing = Math.abs(angDiff(toP, b.yaw));
-    const los = this.map.segClear(b.pos.x, b.pos.z, p.pos.x, p.pos.z, Math.max(b.pos.y, p.pos.y) + 1.5);
-    const sees = !p.dead && los && (facing < 1.3 || dist < 5);
-    if (sees) { ai.last = p.pos.clone(); ai.lastSeen = now; }
-    else if (!p.dead && dist < p.noise && now - ai.heard > 0.6) { ai.heard = now; ai.last = p.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 3, 0, (Math.random() - 0.5) * 3)); ai.lastSeen = Math.max(ai.lastSeen, now - 2.5); ai.path = []; }
-    const recent = now - ai.lastSeen < 4;
-    let goal = null, faceYaw = null;
-    // low on health → go for a chicken box if one is close
-    const food = b.hp < 55 && !(sees && dist < 4) ? this.pickups.find(q => q.alive && q.type === 'chicken' && hdist(q.holder.position, b.pos) < 14) : null;
-    if (sees && dist < 4.4 && !food) {
-      faceYaw = toP;
-      ai.decideT -= dt;
-      if (ai.decideT <= 0) { ai.decideT = 0.4 + Math.random() * 0.6; ai.strafe = Math.random() < 0.5 ? -1 : 1; ai.spacing = 1.6 + Math.random() * 1.0; }
-      const fw = fwdOf(toP), right = new THREE.Vector3(-fw.z, 0, fw.x);
-      const dir = new THREE.Vector3().addScaledVector(right, ai.strafe * 0.8);
-      if (dist > ai.spacing) dir.addScaledVector(fw, 1); else if (dist < 1.3) dir.addScaledVector(fw, -0.8);
-      const pFacing = Math.abs(angDiff(yawTo(p.pos, b.pos), p.yaw));
-      if (pFacing > 0.9) dir.addScaledVector(right, ai.strafe * 0.6);
-      ai.intent = { dir: dir.normalize(), speed: RUN * 0.85 };
-      if (dy > 0.6 && dist < 3) { this.jump(b); ai.intent = { dir: fw, speed: RUN }; } // they're up high: jump at them
-      if (p.atk && !p.atk.hit && dist < 2.7 && ai.dodgeFor !== p.atk) {
-        ai.dodgeFor = p.atk;
-        if (Math.random() < 0.12 + D * 0.5) {
-          const react = 0.22 - D * 0.14;
-          setTimeout(() => { if (this.state === 'live' && !b.dead) { if (Math.random() < 0.25 + D * 0.2) this.jump(b); this.dash(b, Math.random() < 0.5 ? 'back' : (Math.random() < 0.5 ? 'left' : 'right')); } }, react * 1000);
-        }
-      }
-      ai.wantAtk -= dt;
-      const punish = p.atk && p.atk.hit && dist < 2.5;
-      if (!b.atk && dist < 2.25 && facing < 0.5 && Math.abs(dy) < 1.3 && (ai.wantAtk <= 0 || (punish && Math.random() < D * 0.12))) {
-        if (this.canFinish(b, p) && Math.random() < 0.25 + D * 0.3) this.tryFinisher(b, p);
-        else {
-          const r = Math.random();
-          this.tryAttack(b, p, r < 0.12 + (pFacing > 2 ? 0.4 : 0) ? 'heavy' : undefined);
-          if (r > 0.45) setTimeout(() => this.state === 'live' && this.tryAttack(b, p), 250);
-        }
-        ai.wantAtk = 0.9 - D * 0.45 + Math.random() * 0.5;
-      }
-    } else {
-      if (food) goal = { x: food.holder.position.x, z: food.holder.position.z };
-      else if (recent && ai.last) goal = ai.last; else goal = ai.roam;
-      if (!recent && goal === ai.roam && hdist(b.pos, goal) < 1.5) ai.roam = this.map.randomPoint();
-      if (recent && ai.last && hdist(b.pos, ai.last) < 1.2 && !sees) { ai.lastSeen = -99; ai.roam = this.map.randomPoint(); }
-      if (sees && dist > 9) { b.sprint = true; b.sprintT = 1; }
-      const speed = b.sprint ? SPRINT : (recent ? RUN : RUN * 0.8);
-      let target = goal;
-      if (!(this.map.segClear(b.pos.x, b.pos.z, goal.x, goal.z, 0, 0.45))) {
-        ai.pathT -= dt;
-        if (ai.pathT <= 0 || !ai.path.length) { ai.path = this.map.path(b.pos.x, b.pos.z, goal.x, goal.z); ai.pathT = 0.8; }
-        while (ai.path.length > 1 && hdist(ai.path[0], b.pos) < 1.2) ai.path.shift();
-        if (ai.path.length > 1 && this.map.segClear(b.pos.x, b.pos.z, ai.path[1].x, ai.path[1].z, 0, 0.42)) ai.path.shift();
-        if (ai.path.length) target = ai.path[0];
-      }
-      const dir = new THREE.Vector3(target.x - b.pos.x, 0, target.z - b.pos.z);
-      if (dir.lengthSq() > 0.01) { dir.normalize(); ai.intent = { dir, speed }; faceYaw = sees ? toP : Math.atan2(-dir.x, -dir.z); }
-    }
-    if (ai.intent && ai.intent.speed > 1 && b.speed < 0.6 && !b.atk) ai.stuck += dt; else ai.stuck = 0;
-    if (ai.stuck > 0.35 && b.grounded) this.jump(b); // hop over low stuff
-    if (ai.stuck > 0.8) {
-      ai.stuck = 0; ai.path = []; ai.pathT = 0; ai.roam = this.map.randomPoint();
-      if (!sees) ai.lastSeen = -99;
-      const side = new THREE.Vector3(-ai.intent.dir.z, 0, ai.intent.dir.x).multiplyScalar(Math.random() < 0.5 ? 1 : -1);
-      ai.unstick = { dir: side.addScaledVector(ai.intent.dir, -0.5).normalize(), t: 0.45 };
-    }
-    if (ai.unstick && ai.unstick.t > 0) { ai.unstick.t -= dt; ai.intent = { dir: ai.unstick.dir, speed: RUN }; }
-    if (faceYaw !== null) { const turn = (4 + D * 6) * dt, d = angDiff(faceYaw, b.yaw); b.yaw += Math.max(-turn, Math.min(turn, d)); }
   }
 }

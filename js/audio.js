@@ -145,6 +145,7 @@ export const loseSting = () => { chord([392, 466, 587], 0.3, 0.12); chord([349, 
 export const uiClick = () => beep(1200, 0.02, 0.12, 'triangle');
 export const tick = () => { if (!ctx) return; const t = now(); chain(noise(t, 0.02), filt('bandpass', 2600, 4), env(t, 0.001, 0, 0.025, 0.5), sfx); };
 export function reveal(rarityIdx) {
+  if (rarityIdx >= 3) setTimeout(() => choir(rarityIdx === 4 ? 659 : 523), 200);
   if (!ctx) return; const base = [440, 523, 587, 698, 880][rarityIdx] || 440;
   [0, 4, 7, 12, 16].forEach((s, i) => { const f = base * Math.pow(2, s / 12); setTimeout(() => beep(f, 0.08, 0.14, 'triangle'), i * 70); });
   if (rarityIdx >= 3) setTimeout(() => chord([base, base * 1.25, base * 1.5, base * 2], 1.2, 0.1, 'triangle'), 380);
@@ -183,3 +184,21 @@ export function chestShake(level = 0) { if (!ctx) return; const t = now(); chain
 export function rarityUp(level) { if (!ctx) return; const base = [392, 494, 587, 698, 880][level] || 440; [0, 7, 12].forEach((s, i) => setTimeout(() => beep(base * Math.pow(2, s / 12), 0.09, 0.2, 'sawtooth'), i * 60)); whoosh(1.2, null, 1.4); }
 export function chestOpen() { if (!ctx) return; const t = now(); chain(noise(t, 0.8), filt('highpass', 2000), env(t, 0.005, 0.1, 0.7, 0.4), sfx); const o = osc('sine', 60); o.frequency.exponentialRampToValueAtTime(30, t + 0.6); chain(o, env(t, 0.005, 0.1, 0.5, 1.0), sfx); o.start(t); o.stop(t + 0.8); shing(null, 0.2); }
 export function swoosh() { whoosh(0.6, null, 1.8); }
+
+// ---------- V3 dopamine pack ----------
+export function riser(dur = 1) { if (!ctx) return; const t = now(); const bp = filt('bandpass', 300, 3); bp.frequency.setValueAtTime(300, t); bp.frequency.exponentialRampToValueAtTime(4000, t + dur); chain(noise(t, dur + 0.1), bp, env(t, dur * 0.8, 0, 0.2, 0.35), sfx); }
+export function latch() { if (!ctx) return; const t = now(); chain(noise(t, 0.04), filt('bandpass', 3200, 6), env(t, 0.001, 0.005, 0.04, 0.7), sfx); const o = osc('square', 1900); chain(o, filt('bandpass', 1900, 8), env(t, 0.001, 0.01, 0.05, 0.25), sfx); o.start(t); o.stop(t + 0.08); }
+export function hiss() { if (!ctx) return; const t = now(); const hp = filt('highpass', 2500); hp.frequency.setValueAtTime(5000, t); hp.frequency.exponentialRampToValueAtTime(1200, t + 0.6); chain(noise(t, 0.7), hp, env(t, 0.01, 0.2, 0.45, 0.45), sfx); }
+export function boom(k = 1) {
+  if (!ctx) return; const t = now();
+  const o = osc('sine', 90); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(28, t + 0.7);
+  chain(o, env(t, 0.004, 0.08, 0.7, 1.4 * k), sfx); o.start(t); o.stop(t + 0.9);
+  chain(noise(t, 0.6, { rate: 0.6 }), filt('lowpass', 900), env(t, 0.002, 0.05, 0.5, 0.9 * k), sfx);
+  chain(noise(t, 0.25), filt('highpass', 3000), env(t, 0.001, 0.02, 0.2, 0.3 * k), sfx);
+}
+export function pop() { if (!ctx) return; const t = now(); chain(noise(t, 0.08), filt('bandpass', 1500, 1), env(t, 0.001, 0.01, 0.07, 0.5), sfx); [2093, 2637, 3136].forEach((f, i) => setTimeout(() => beep(f, 0.04, 0.06, 'triangle'), 40 + i * 35)); }
+export function choir(base = 523) { if (!ctx) return; const t = now(); [1, 1.25, 1.5, 2].forEach(m => [-6, 6].forEach(det => { const o = osc('sawtooth', base * m); o.detune.value = det; chain(o, filt('lowpass', 1800, 0.7), env(t, 0.35, 1.0, 1.2, 0.05), sfx); o.start(t); o.stop(t + 2.7); })); [0, 0.3, 0.6].forEach(d => setTimeout(() => shing(null, 0.2), d * 1000)); }
+export function rankUp() { boom(0.6); [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => setTimeout(() => beep(f, 0.1, 0.18, 'sawtooth'), i * 80)); setTimeout(() => choir(523), 500); }
+export function coinShower(n = 12) { for (let i = 0; i < n; i++) setTimeout(() => beep(1800 + Math.random() * 1600, 0.03, 0.06, 'triangle'), i * 45 + Math.random() * 30); }
+export function inspectShing() { shing(null, 0.14); }
+export function ping() { if (!ctx) return; [1320, 990].forEach((f, i) => setTimeout(() => { const t = now(), o = osc('sine', f); chain(o, env(t, 0.005, 0.05, 0.35, 0.18), sfx); o.start(t); o.stop(t + 0.5); }, i * 160)); }
