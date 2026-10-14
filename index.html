@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2b1a5c">
+<title>Shankmaster</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M8 52 L40 12 Q52 4 56 8 Q60 12 52 24 L14 56Z' fill='%23ff2d55' stroke='%23111' stroke-width='4'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Lilita+One&family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="screenBlood"></canvas>
+<div id="hurt"></div>
+<div id="lowhp"></div>
+
+<!-- ============ LOADING ============ -->
+<section id="loading" class="screen show">
+  <div class="logo big">SHANK<span>MASTER</span></div>
+  <div class="loadbar"><i></i></div>
+  <p class="hint">sharpening blades…</p>
+</section>
+
+<!-- ============ HOME ============ -->
+<section id="home" class="screen">
+  <header class="topbar">
+    <div class="logo">SHANK<span>MASTER</span></div>
+    <div class="wallet">
+      <button class="chip" data-go="store"><b class="coin"></b><span id="coins">0</span></button>
+      <button class="chip chest-chip" id="chestChip"><b class="chest"></b><span id="chestCount">0</span></button>
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button>
+    </div>
+  </header>
+  <div class="home-body">
+    <div class="rank-card" id="rankCard"></div>
+    <div class="loadout-card" id="loadoutCard"></div>
+  </div>
+  <footer class="home-actions">
+    <button class="btn ghost" data-go="locker">LOCKER</button>
+    <button class="btn ghost" data-go="store">STORE</button>
+    <button class="btn play" id="playBtn">PLAY RANKED<small>1v1 · first to 3</small></button>
+  </footer>
+</section>
+
+<!-- ============ LOCKER ============ -->
+<section id="locker" class="screen panel-screen">
+  <header class="topbar"><button class="back" data-go="home">‹ BACK</button><h2>LOCKER</h2><div class="tabs" id="lockerTabs">
+    <button data-tab="knives" class="on">KNIVES</button><button data-tab="chars">CHARACTERS</button><button data-tab="fins">FINISHERS</button></div></header>
+  <div class="locker-body">
+    <div class="grid" id="lockerGrid"></div>
+    <aside class="detail" id="lockerDetail"></aside>
+  </div>
+</section>
+
+<!-- ============ STORE ============ -->
+<section id="store" class="screen panel-screen">
+  <header class="topbar"><button class="back" data-go="home">‹ BACK</button><h2>STORE</h2>
+    <div class="wallet"><span class="chip"><b class="coin"></b><span class="coinsMirror">0</span></span></div></header>
+  <div class="store-body" id="storeBody"></div>
+</section>
+
+<!-- ============ CASE OPENING ============ -->
+<section id="caseOpen" class="screen overlay">
+  <h2 class="case-title">ENDZ CHEST</h2>
+  <div class="reel-wrap"><div class="reel" id="reel"></div><div class="reel-marker"></div></div>
+  <div class="case-result" id="caseResult"></div>
+  <div class="case-actions" id="caseActions"></div>
+</section>
+
+<!-- ============ MATCHMAKING ============ -->
+<section id="mm" class="screen overlay">
+  <div class="mm-box">
+    <h2 id="mmTitle">FINDING OPPONENT</h2>
+    <div class="spinner"></div>
+    <p id="mmTime">0:00</p>
+    <div class="vs" id="vs"></div>
+    <button class="btn ghost small" id="mmCancel">CANCEL</button>
+  </div>
+</section>
+
+<!-- ============ HUD ============ -->
+<section id="hud" class="screen hud">
+  <div class="scorebar">
+    <div class="sb-side me"><span class="sb-name">YOU</span><b id="sbMe">0</b></div>
+    <div class="sb-mid"><small id="sbRound">ROUND 1</small><b id="sbTime">1:15</b></div>
+    <div class="sb-side op"><b id="sbOp">0</b><span class="sb-name" id="sbOpName">OPP</span></div>
+  </div>
+  <div class="killfeed" id="killfeed"></div>
+  <div class="crosshair"></div>
+  <div class="hitmark" id="hitmark"></div>
+  <div class="dmgnum" id="dmgnum"></div>
+  <div class="banner" id="banner"></div>
+  <div class="countdown" id="countdown"></div>
+  <div class="toast" id="toast"></div>
+  <div class="finprompt" id="finPrompt"><span id="finText">DOUBLE TAP</span> — FINISH THEM</div>
+  <div class="hp"><i class="cross">✚</i><b id="hpNum">100</b><div class="hpbar"><i id="hpBar"></i></div></div>
+  <div class="abilities"><div class="ab" id="abDash"><i></i><span>DASH</span></div><div class="ab" id="abSprint"><span>SPRINT</span></div></div>
+  <div class="knifename" id="knifeName"></div>
+  <button class="icon-btn hud-btn" id="pauseBtn" aria-label="Pause">❚❚</button>
+  <button class="icon-btn hud-btn" id="inspectBtn" aria-label="Inspect">◎</button>
+  <div class="joy" id="joy"><i></i></div>
+  <div class="tutorial" id="tutorial"></div>
+  <div class="roundres" id="roundRes"></div>
+</section>
+
+<!-- ============ RESULT ============ -->
+<section id="result" class="screen overlay">
+  <div class="result-box" id="resultBox"></div>
+</section>
+
+<!-- ============ PAUSE / SETTINGS ============ -->
+<section id="modal" class="screen overlay"><div class="modal-box" id="modalBox"></div></section>
+
+<div class="rotate-hint" id="rotateHint">↻ Turn your phone sideways for the best view</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
