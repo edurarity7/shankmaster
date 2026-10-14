@@ -43,7 +43,7 @@ export class Thumbs {
     c.update(0.016, { speed: 0 });
     const back = slot === 'back';
     c.root.rotation.y = back ? 0.5 : Math.PI - 0.35; c.root.updateMatrixWorld(true);
-    const F = { head: [1.82, 1.15, 22], face: [1.74, 0.95, 20], top: [1.25, 2.4, 30], neck: [1.42, 1.2, 24], back: [1.3, 2.2, 30], gloves: [1.0, 1.5, 30], legs: [0.55, 2.4, 32], kicks: [0.1, 1.3, 28] }[slot] || [1.2, 3, 30];
+    const F = { head: [1.9, 1.5, 24], face: [1.76, 1.15, 22], top: [1.25, 2.4, 30], neck: [1.42, 1.2, 24], back: [1.3, 2.2, 30], gloves: [1.0, 1.5, 30], legs: [0.55, 2.4, 32], kicks: [0.1, 1.3, 28] }[slot] || [1.2, 3, 30];
     this.scene.add(g);
     this.r.setSize(w, h, false); this.cam.aspect = w / h; this.cam.fov = F[2];
     this.cam.position.set(0.15, F[0] + 0.1, F[1] + 0.2); this.cam.lookAt(0, F[0], 0); this.cam.updateProjectionMatrix();

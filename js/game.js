@@ -6,6 +6,7 @@ import { FINISHERS } from './data.js';
 import { STEP } from './map.js';
 import * as A from './audio.js';
 import { BotBrain } from './bot.js';
+import { StreetLife } from './npcs.js';
 import { save } from './data.js';
 
 const WALK = 2.4, RUN = 5.4, SPRINT = 8.0, DASH_SPEED = 17, DASH_T = 0.2, DASH_IFRAME = 0.18, DASH_CD = 0.8;
@@ -52,6 +53,7 @@ export class Match {
     this.op.model.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
     scene.add(this.op.model.root);
     this.brain = new BotBrain(this);
+    this.street = new StreetLife(this);
     this.score = [0, 0]; this.round = 0; this.state = 'intro'; this.stateT = 0; this.timeScale = 1; this.hitstop = 0;
     this.shake = 0; this.fov = 80; this.dip = 0; this.camRoll = 0; this.deathCam = 0; this.myCombo = 0; this.myComboT = 0;
     this.stats = { hits: 0, taken: 0, finishers: 0, backstabs: 0, dashDodges: 0, airHits: 0, pickups: 0, kills: 0, damage: 0 };
@@ -60,7 +62,7 @@ export class Match {
     vm.setLoadout(me.outfit, me.item);
     this.startRound();
   }
-  dispose() { this.op.model.dispose(); this.scene.remove(this.pickupGroup); }
+  dispose() { this.op.model.dispose(); this.street.dispose(); this.scene.remove(this.pickupGroup); }
 
   // ---------- rounds ----------
   startRound() {
@@ -95,6 +97,20 @@ export class Match {
     const ang = Math.atan2(-(op.pos.x - me.pos.x), -(op.pos.z - me.pos.z)) - me.yaw;
     this.ui.ping?.(ang, Math.round(hdist(me.pos, op.pos)));
     A.ping?.();
+  }
+  // A vehicle hit a fighter standing in the road.
+  trafficHit(f, v, side) {
+    if (f.iframe || f.finLock) return;
+    f.hp = Math.max(0, f.hp - v.dmg);
+    f.vel.set(side * (v.kind === 'bike' ? 4 : 8), 0, -v.speed * 0.7); f.vy = v.kind === 'bike' ? 4 : 7.5; f.grounded = false;
+    f.stun = 0.7; f.atk = null; f.sprint = false; f.dashT = 0;
+    const P = { x: f.pos.x, y: f.pos.y + 1, z: f.pos.z };
+    this.fx.burst(f.pos.clone().setY(f.pos.y + 1), new THREE.Vector3(side, 0.4, -0.5), v.dmg / 14); A.thud(P); A.grunt(f.isBot ? P : null, 0.8);
+    const what = v.kind === 'bus' ? "BUS'D!" : v.kind === 'bike' ? 'CYCLE LANE!' : v.kind === 'police' ? 'COP CAR!' : v.kind === 'cab' ? 'BLACK CAB!' : 'HIT BY A CAR!';
+    if (!f.isBot) { this.hurtFx(v.dmg / 25, 0); this.ui.banner(what, '#ff3355'); this.shake = 0.6; }
+    else { this.ui.banner(what, '#3de0ff'); this.coins(10, 'ROADKILL ASSIST'); }
+    this.street.alarm(f.pos);
+    if (f.hp <= 0) this.kill(f === this.me ? this.op : this.me, f, 'traffic');
   }
   coins(n, why) { this.earned += n; this.ui.coinPop(n, why); }
 
@@ -176,6 +192,7 @@ export class Match {
         else this.startRound();
       }
     }
+    if (this.state !== 'over') this.street.update(dt);
     if (this.state !== 'live') this.brain.intent = null;
     const frozen = this.state === 'countdown' || this.state === 'over';
     this.moveFighter(me, dt, frozen ? null : this.myMoveIntent());
@@ -328,6 +345,7 @@ export class Match {
     this.fx.burst(at, dir, dmg / 30);
     const P = { x: at.x, y: at.y, z: at.z };
     def.kind === 'stab' || def.kind === 'heavy' ? A.stab(t.isBot ? P : null) : A.slice(t.isBot ? P : null);
+    this.street.alarm(t.pos);
     if (behind) { this.ui.banner('BACKSTAB!', '#ff3355'); if (!f.isBot) this.stats.backstabs++; }
     if (air) { this.ui.banner('AIR SHANK!', '#3de0ff'); if (!f.isBot) this.stats.airHits++; }
     this.hitstop = dmg > 40 ? 0.085 : 0.05;

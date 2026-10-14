@@ -12,7 +12,7 @@ import { ChestReveal } from './reveal.js';
 import { Post } from './post.js';
 import { makeEnvScene } from './textures.js';
 import { updateKnifeFX } from './knives.js';
-export const VERSION = 'v0.3';
+export const VERSION = 'v0.4';
 import * as A from './audio.js';
 
 const canvas = document.getElementById('gl');

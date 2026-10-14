@@ -124,7 +124,8 @@ export class ChestReveal {
   }
   showKnife() {
     this.stage = 'knife'; this.t = 0;
-    const k = this.knife = buildKnife(this.item, { hi: true }); k.scale.setScalar(10.5);
+    const k = this.knife = buildKnife(this.item, { hi: true });
+    this.knifeLen = new THREE.Box3().setFromObject(k).getSize(new THREE.Vector3()).x || 0.3; // fit it to the screen in update()
     this.knifeG.clear(); this.knifeG.add(k); this.knifeG.position.set(0, 0.9, 0.2); this.knifeG.scale.setScalar(0.01);
     this.burst(140, TIER_COL[this.tier], 1.4); this.wave(TIER_COL[this.tier], 1.2);
     if (this.tier >= 3) setTimeout(() => { this.burst(200, new THREE.Color(1, 0.85, 0.3), 2.2); this.wave(new THREE.Color(1, 0.85, 0.3), 1.6); A.boom(0.6); }, 380);
@@ -182,8 +183,11 @@ export class ChestReveal {
       this.chest.rotation.y += (0 - this.chest.rotation.y) * dt * 4; this.chest.rotation.z *= 0.9;
     } else if (this.stage === 'knife') {
       const k = Math.min(1, this.t / 0.7), e = 1 - Math.pow(1 - k, 3);
-      this.knifeG.scale.setScalar(Math.max(0.01, e));
-      this.knifeG.position.y = 0.9 + e * 0.95 + Math.sin(this.t * 1.6) * 0.05;
+      // fit: knife spans ~58% of the visible width at its distance (both portrait and landscape)
+      const dist = this.camera.position.z - this.knifeG.position.z, visW = 2 * dist * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * this.camera.aspect;
+      const fit = Math.min(visW * 0.58, 2 * dist * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 0.5) / this.knifeLen;
+      this.knifeG.scale.setScalar(Math.max(0.01, e * fit));
+      this.knifeG.position.y = 0.9 + e * 0.75 + Math.sin(this.t * 1.6) * 0.04;
       this.knifeG.rotation.set(0.12, (1 - e) * Math.PI * 4 + Math.sin(this.t * 0.9) * 0.45, 0.45 + Math.sin(this.t * 1.3) * 0.08); // spins in, then faces you
       if (this.knife && this.t > 1.2) knifeTrick(this.knife, ((this.t - 1.2) / 2.6) % 1, 'inspect');
       this.chest.position.y += (-1.4 - this.chest.position.y) * dt * 2.5;

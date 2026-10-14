@@ -208,12 +208,12 @@ export function knifeTrick(root, t, kind = 'inspect') {
   if (type === 'flip') {
     fp.rotation.z = Math.PI * 0.97 * (ease(seg(t, 0.08, 0.22)) - back(seg(t, 0.72, 0.86)) + (t >= 0.86 ? 0 : 0));
     if (t > 0.86) fp.rotation.z = 0;
-    return [0, Math.PI * 2 * ease(seg(t, 0.28, 0.66)), Math.sin(Math.PI * seg(t, 0.28, 0.66)) * 0.5];
+    return [Math.PI * 2 * ease(seg(t, 0.28, 0.66)), 0, Math.sin(Math.PI * seg(t, 0.28, 0.66)) * 0.35];
   }
   if (type === 'karambit' || type === 'talon') {
-    return [0, 0, -Math.PI * 4 * ease(seg(t, 0.12, 0.7))]; // finger-ring spins
+    return [0, 0, -Math.PI * 4 * ease(seg(t, 0.12, 0.7))]; // finger-ring spins (pivot is the ring, so it stays in the hand)
   }
   // twirl: roll the blade to show both faces, then a flip toss in the hand
-  return [Math.PI * 2 * ease(seg(t, 0.1, 0.45)), 0, Math.PI * 2 * ease(seg(t, 0.55, 0.9))];
+  return [Math.PI * 2 * ease(seg(t, 0.1, 0.45)) + Math.PI * 2 * ease(seg(t, 0.55, 0.9)), 0, Math.sin(Math.PI * seg(t, 0.5, 0.95)) * 0.55];
 }
 export const TRICK_CLICKS = { butterfly: [0.22, 0.4, 0.62, 0.88], flip: [0.2, 0.84], karambit: [0.3, 0.55], talon: [0.3, 0.55], default: [0.3, 0.75] };

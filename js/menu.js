@@ -51,7 +51,7 @@ export class MenuStage {
     // lights
     S.add(new THREE.HemisphereLight(0xbcd2ff, 0x0a1a5a, 0.9));
     const key = this.key = new THREE.SpotLight(0xfff2dc, 45, 20, 0.45, 0.5, 1.2); key.position.set(2.5, 6, 4); key.castShadow = true; key.shadow.mapSize.set(1024, 1024); key.shadow.bias = -0.0005; S.add(key, key.target);
-    const rimL = new THREE.DirectionalLight(0x6fb0ff, 2.2); rimL.position.set(-3, 3, -4); S.add(rimL);
+    const rimL = this.rimL = new THREE.DirectionalLight(0x6fb0ff, 2.6); rimL.position.set(-3, 3, -4); S.add(rimL);
     const rimR = new THREE.DirectionalLight(0xffb070, 1.0); rimR.position.set(4, 2, -3); S.add(rimR);
     // floating sparkles
     const n = 120, pos = new Float32Array(n * 3);
@@ -85,6 +85,9 @@ export class MenuStage {
   }
   inspect() { this.inspectT = 0; this.clicks = 0; A.inspectShing(); }
   emote() { this.emoteT = 0; }
+  setRankColor(c) { const col = new THREE.Color(c); this.glowRing.material.color.copy(col).multiplyScalar(2.2); this.sparks.material.color.copy(col).lerp(new THREE.Color(1, 1, 1), 0.5).multiplyScalar(1.8); this.rimL.color.copy(col).lerp(new THREE.Color(0x6fb0ff), 0.5); }
+  // screen position of a point above the character's head (for the DOM rank plate)
+  headScreen() { const v = new THREE.Vector3(0, 2.55, 0).applyMatrix4(this.holder.matrixWorld).project(this.camera); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight, vis: v.z < 1 }; }
   update(dt, aspect) {
     this.t += dt;
     const portrait = aspect < 1;
@@ -108,7 +111,7 @@ export class MenuStage {
     else if (M === 'legs') { want = new THREE.Vector3(0.2, 0.9, 2.8); look = new THREE.Vector3(0, 0.75, 0); }
     else if (M === 'body') { want = new THREE.Vector3(0.2, 1.55, 4.4); look = new THREE.Vector3(0, 1.45, 0); }
     else if (M === 'store') { want = new THREE.Vector3(0, 1.4, 6.2); look = new THREE.Vector3(0, 1.6, 0); }
-    else { want = portrait ? new THREE.Vector3(0, 1.5, 6.6) : new THREE.Vector3(0, 1.35, 5.6); look = new THREE.Vector3(0, portrait ? 1.2 : 1.1, 0); }
+    else { want = portrait ? new THREE.Vector3(0, 1.0, 6.3) : new THREE.Vector3(0, 1.0, 5.4); look = new THREE.Vector3(0, portrait ? 1.42 : 1.15, 0); }
     if (M !== 'home') { // a bottom sheet covers ~60% of the screen: frame the subject in the space above it
       const shift = want.distanceTo(look) * Math.tan(THREE.MathUtils.degToRad(fov / 2)) * (portrait ? (M === 'head' ? 0.45 : 0.58) : 0.0);
       look.y -= shift; want.y -= shift * 0.4;

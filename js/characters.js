@@ -2,6 +2,7 @@
 // Model faces -Z; its right hand is on +X.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { DRIP, SKIN_TONES, DEFAULT_OUTFIT } from './data.js';
 import { toonGradient, checkTexture, fabricBump } from './textures.js';
 import { buildKnife, disposeKnife } from './knives.js';
@@ -60,9 +61,39 @@ export class Character {
     this.outline = outline;
     this.root = new THREE.Group(); this.root.name = 'character';
     this.build();
+    this.optimize();
     if (item) this.setKnife(item);
   }
-  m(color, extra) { const t = toon(color, extra); this.mats.push(t); return t; }
+  m(color, extra) {
+    const key = color + '|' + JSON.stringify(extra || {});
+    this.matCache ??= new Map();
+    if (!this.matCache.has(key)) { const t = toon(color, extra); this.mats.push(t); this.matCache.set(key, t); }
+    return this.matCache.get(key);
+  }
+  // Merge each rig part's meshes (and their ink outlines) into one mesh per material: ~6x fewer draw calls.
+  optimize() {
+    this.root.updateMatrixWorld(true);
+    const groups = []; this.root.traverse(o => { if (o.isGroup || o === this.root) groups.push(o); });
+    const prep = (geo, m4) => {
+      const g = geo.index ? geo.toNonIndexed() : geo.clone();
+      for (const n of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(n)) g.deleteAttribute(n);
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      return g.applyMatrix4(m4);
+    };
+    for (const grp of groups) {
+      const buckets = new Map(), kill = [];
+      for (const m of grp.children) {
+        if (!m.isMesh) continue;
+        const add = (mesh, m4) => { const k = mesh.material.uuid; if (!buckets.has(k)) buckets.set(k, { mat: mesh.material, geos: [] }); buckets.get(k).geos.push(prep(mesh.geometry, m4)); };
+        add(m, m.matrix);
+        m.children.forEach(o => { if (o.isMesh) add(o, m.matrix.clone().multiply(o.matrix)); });
+        kill.push(m);
+      }
+      if (kill.length < 2) continue;
+      kill.forEach(m => grp.remove(m));
+      buckets.forEach(({ mat, geos }) => { const mesh = new THREE.Mesh(mergeGeometries(geos, false), mat); mesh.castShadow = mat !== outlineMat; grp.add(mesh); });
+    }
+  }
   p(geo, color, parent, pos = [0, 0, 0], scale, extra, opts = {}) {
     const mesh = inked(geo, typeof color === 'number' ? this.m(color, extra) : color, { outline: this.outline && opts.outline !== false });
     mesh.position.set(...pos); if (scale) mesh.scale.set(...scale); parent.add(mesh); return mesh;

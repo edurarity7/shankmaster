@@ -85,6 +85,7 @@ export class BotBrain {
       ai.unstick = { dir: side.addScaledVector(ai.intent.dir, -0.5).normalize(), t: 0.45 };
     }
     if (ai.unstick && ai.unstick.t > 0) { ai.unstick.t -= dt; ai.intent = { dir: ai.unstick.dir, speed: RUN }; }
+    if (this.carDanger && b.grounded) { ai.intent = { dir: new THREE.Vector3(this.carDanger.side, 0, 0), speed: RUN }; if (Math.random() < dt * 2) M.jump(b); } // get out of the road
     if (faceYaw !== null) { const turn = (4 + D * 6) * dt, d = angDiff(faceYaw, b.yaw); b.yaw += Math.max(-turn, Math.min(turn, d)); }
   }
 }

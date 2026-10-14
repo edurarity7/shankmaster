@@ -5,6 +5,7 @@
 Run locally: `python3 devserver.py 8643` then open http://localhost:8643
 
 - `js/game.js` — rounds, movement physics (jump, dash, sprint, jump pads), combat, pickups, radar ping
+- `js/npcs.js` — street life: traffic through the tunnel (cars, cabs, police, bus, cyclists), pedestrians/police who panic, dogs
 - `js/bot.js` — AI opponent ("brain"); a future network brain plugs into the same interface
 - `js/map.js` — London map, parkour props, 2.5D collision
 - `js/characters.js` — cel-shaded characters with modular drip

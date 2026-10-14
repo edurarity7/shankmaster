@@ -77,12 +77,13 @@ export class GameMap {
     [[-32, -20], [-20, -10]].forEach(([z0, z1], i) => this.terrace(7, 22, z0, z1, 'x-', bricks[(i + 2) % 4], 9 + i, i + 5));
     [[10, 21], [21, 32]].forEach(([z0, z1], i) => this.terrace(7, 22, z0, z1, 'x-', bricks[(i + 1) % 4], 8.5 + i, i + 7));
     this.tower(22, 30, -10, 10);
-    this.shop(-7, 0, -38, -32, 'PERI PERI PALACE', '#d61f2a', '#ffd23a', 'FRIED CHICKEN · OPEN TILL 4AM', 0xff5040);
-    this.shop(0, 7, -38, -32, 'OFF LICENCE', '#1238c9', '#ffffff', 'NEWS · LOTTO · CARDS', 0x5f8cff);
+    this.shop(-7, -2.2, -38, -32, 'PERI PERI PALACE', '#d61f2a', '#ffd23a', 'FRIED CHICKEN · OPEN TILL 4AM', 0xff5040);
+    this.shop(2.2, 7, -38, -32, 'OFF LICENCE', '#1238c9', '#ffffff', 'NEWS · LOTTO · CARDS', 0x5f8cff);
     this.bridge();
+    this.northRoad();
 
     // ---- cover + parkour ----
-    this.bus(-2.3, -9);
+    this.bus(-2.65, -9);
     this.car(2.1, 10.3, 0x161616, true);
     this.car(-2.5, 18.2, 0xb8c2cc, false);
     this.car(2.4, -22, 0x2a63e0, false);
@@ -112,7 +113,7 @@ export class GameMap {
 
     this.pickupSpots = [{ x: 0, z: 0.0 }, { x: 14, z: 6.2 }, { x: -5.3, z: -12 }, { x: 5.6, z: 24 }, { x: -6.3, z: -29.5, y: 2.2 }, { x: 0.8, z: -26 }, { x: 14, z: -8.4 }];
     this.collider(-30, -7.0, -40, 40); this.collider(7, 40, -40, -10); this.collider(7, 40, 10, 40);
-    this.collider(-30, 40, -40, -32); this.collider(-30, 40, 32, 40); this.collider(22, 40, -40, 40);
+    this.collider(-30, -2.2, -40, -32); this.collider(2.2, 40, -40, -32); this.collider(-30, -3.6, 32, 40); this.collider(3.6, 40, 32, 40); this.collider(22, 40, -40, 40);
     this.spawns = [
       [{ x: 0, z: 28 }, { x: 0, z: -28 }],
       [{ x: -5.2, z: 29.5 }, { x: 18, z: -5 }],
@@ -187,14 +188,30 @@ export class GameMap {
     const light = new THREE.PointLight(glowC, 8, 10, 2); light.position.set(cx, 2.6, front + 1.6); this.group.add(light);
   }
   bridge() {
-    const brick = std(0xffffff, { map: brickTexture('#6e3426', '#9d8a78') }); brick.map.repeat.set(10, 3);
-    this.box(44, 9, 3, brick, 0, 0, 33.5);
-    const arch = new THREE.Mesh(new THREE.CircleGeometry(3.6, 32, 0, Math.PI), new THREE.MeshBasicMaterial({ color: 0x050818 }));
-    arch.position.set(0, 3.4, 31.98); arch.rotation.y = Math.PI; this.group.add(arch);
-    const archB = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 3.4), arch.material); archB.position.set(0, 1.7, 31.98); archB.rotation.y = Math.PI; this.group.add(archB);
-    const fence = this.M('fence', () => std(0x2a2d33, { metalness: 0.6, roughness: 0.4 }));
-    for (let x = -3.4; x <= 3.4; x += 0.35) this.box(0.05, 2.6, 0.05, fence, x, 0, 31.6, { collide: false, shadow: false });
+    // railway bridge with a real tunnel opening — traffic drives in and out of the dark
+    const brick = std(0xffffff, { map: brickTexture('#6e3426', '#9d8a78') }); brick.map.repeat.set(4, 3);
+    this.box(18.4, 9, 3, brick, -12.8, 0, 33.5); this.box(18.4, 9, 3, brick, 12.8, 0, 33.5);
+    this.box(7.2, 4.0, 3, brick, 0, 5.0, 33.5, { collide: false });
+    const dark = new THREE.MeshBasicMaterial({ color: 0x03050e, side: THREE.BackSide });
+    const tunnel = new THREE.Mesh(new THREE.BoxGeometry(7.2, 5.0, 14), dark); tunnel.position.set(0, 2.5, 39); this.group.add(tunnel);
+    this.mesh(new THREE.PlaneGeometry(7.2, 14), this.M('tunnelroad', () => std(0x1a1c24)), 0, 0.01, 39, { shadow: false }).rotation.x = -Math.PI / 2;
+    const lampM = glow(2.2, 1.6, 0.8); [35.5, 40, 44.5].forEach(z => this.mesh(new THREE.BoxGeometry(0.5, 0.08, 0.2), lampM, 0, 4.85, z, { shadow: false }));
     this.box(44, 0.8, 3.6, this.M('rail', () => std(0x3a2a2a)), 0, 9, 33.5, { collide: false });
+    this.collider(-3.6, 3.6, 32, 35, 50); // players can't walk into the tunnel
+  }
+  // the street carries on north past the shops — traffic drives off into the fog
+  northRoad() {
+    const asphalt = this.M('asph2', () => { const m = std(0xffffff, { map: asphaltTexture(), roughness: 0.9 }); m.map.repeat.set(1, 12); return m; });
+    this.plane(4.4, 60, asphalt, 0, 0.0, -62);
+    const white = this.M('white', () => new THREE.MeshBasicMaterial({ color: 0xf6f6f6 }));
+    for (let z = -34; z > -90; z -= 4) this.plane(0.14, 2, white, 0, 0.012, z);
+    const bricks = [brickTexture('#b65a3c'), brickTexture('#8f4a36', '#cbb8a2')];
+    [-1, 1].forEach((sd, i) => { const m = std(0xffffff, { map: bricks[i] }); m.map.repeat.set(16, 3); this.box(10, 10, 56, m, sd * 7.3, 0, -66, { collide: false }); });
+    const bol = this.M('bollard', () => std(0x16181d, { metalness: 0.5, roughness: 0.4 })), band = this.M('bolband', () => glow(1.6, 1.6, 1.6));
+    [-2.0, 2.0].forEach(x => { this.mesh(new THREE.CylinderGeometry(0.12, 0.14, 1.0, 14), bol, x, 0.5, -32.3); this.mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.08, 14), band, x, 0.85, -32.3, { shadow: false }); });
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 1.0), new THREE.MeshBasicMaterial({ map: signTexture('ONE WAY ↑', { bg: '#1238c9', fg: '#ffffff', w: 256, h: 256, font: 'Rubik, Arial' }), color: new THREE.Color(1.3, 1.3, 1.3) }));
+    sign.position.set(4.3, 2.4, 30.5); sign.rotation.y = Math.PI; this.group.add(sign);
+    this.collider(-2.2, 2.2, -33.5, -32.2, 50);
   }
   bus(x, z) {
     const g = new THREE.Group(), red = this.M('busred', () => std(0xe0141e, { roughness: 0.35 })), glass = this.M('busglass', () => std(0x16234a, { roughness: 0.1, metalness: 0.5 })), cream = this.M('cream', () => std(0xf0e6c8));
@@ -354,7 +371,7 @@ export class GameMap {
   }
   extras() {
     // contact shadows
-    [[-2.3, -9, 3.4, 11.5], [2.1, 10.3, 2.6, 5.2], [-2.5, 18.2, 2.6, 5.2], [2.4, -22, 2.6, 5.2], [5.1, 2.6, 1.6, 1.6], [-5.7, 24.5, 3, 5.5], [14, 0, 3.4, 3.4]].forEach(([x, z, w, d]) => this.blob(x, z, w, d, 0.075));
+    [[-2.65, -9, 3.4, 11.5], [2.1, 10.3, 2.6, 5.2], [-2.5, 18.2, 2.6, 5.2], [2.4, -22, 2.6, 5.2], [5.1, 2.6, 1.6, 1.6], [-5.7, 24.5, 3, 5.5], [14, 0, 3.4, 3.4]].forEach(([x, z, w, d]) => this.blob(x, z, w, d, 0.075));
     [[10, -6.5], [18.5, -7], [10.2, 6.8], [19.2, 7.2]].forEach(([x, z]) => this.blob(x, z, 4.2, 4.2, 0.05, 0.35));
     // string lights criss-crossing the street (bloom candy)
     this.stringLights(-6.9, -24, 6.9, -20, 6.2); this.stringLights(-6.9, -4, 6.9, -8, 6.0); this.stringLights(-6.9, 14, 6.9, 18, 6.3);
@@ -364,7 +381,7 @@ export class GameMap {
     [13.6, 14.6, 15.6].forEach((z, i) => this.bike(-5.9, z, [0xd8203a, 0x1238c9, 0xd8203a][i]));
     this.collider(-6.4, -5.4, 13.1, 16.1, 1.0);
     // cones, puddles, manholes
-    [[-1.2, -16.5], [-0.6, -17.2], [3.2, 4.2], [2.6, 15.8], [-3.2, 26]].forEach(([x, z]) => this.cone(x, z));
+    [[-3.2, -16.5], [-2.7, -17.4], [3.2, 4.2], [3.3, 15.8], [-3.2, 26]].forEach(([x, z]) => this.cone(x, z));
     [[1.2, -14, 2.2, 1.2], [-1.8, 7, 1.6, 0.9], [2.6, 23, 2.4, 1.3], [-0.5, -27, 1.8, 1]].forEach(([x, z, w, d]) => this.puddle(x, z, w, d));
     [[0, -18], [0, 6], [-1.5, 24]].forEach(([x, z]) => this.manhole(x, z));
     this.barber(-6.98, -10.2);

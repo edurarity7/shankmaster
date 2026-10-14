@@ -62,23 +62,25 @@
   <!-- HOME (battle) -->
   <div class="tab show" id="tab-home">
     <div class="home-logo logo-slot"></div>
+    <div class="hero-plate" id="heroPlate"></div>
+    <div class="tap-hint" id="tapHint">tap your character to flex ✦</div>
     <div class="home-bottom">
       <div class="winchest" id="winChest"></div>
       <button class="btn-play" id="playBtn"><span>PLAY</span><small>RANKED 1v1 · THE ENDZ</small></button>
     </div>
   </div>
   <!-- SHOP -->
-  <div class="tab sheet" id="tab-shop"><div class="sheet-inner" id="shopBody"></div></div>
+  <div class="tab sheet" id="tab-shop"><div class="sheet-head"><b>🛒 SHOP</b><button class="sheet-x" aria-label="Close">✕</button></div><div class="sheet-inner" id="shopBody"></div></div>
   <!-- LOCKER -->
-  <div class="tab sheet" id="tab-locker">
+  <div class="tab sheet" id="tab-locker"><div class="sheet-head"><b>🔪 LOCKER</b><button class="sheet-x" aria-label="Close">✕</button></div>
     <div class="seg" id="lockerSeg"><button data-seg="knives" class="on">KNIVES</button><button data-seg="drip">DRIP</button><button data-seg="fins">FINISHERS</button></div>
     <div class="slotbar" id="slotBar"></div>
     <div class="sheet-inner" id="lockerBody"></div>
   </div>
   <!-- PASS / QUESTS -->
-  <div class="tab sheet" id="tab-pass"><div class="sheet-inner" id="passBody"></div></div>
+  <div class="tab sheet" id="tab-pass"><div class="sheet-head"><b>📜 QUESTS & LEVELS</b><button class="sheet-x" aria-label="Close">✕</button></div><div class="sheet-inner" id="passBody"></div></div>
   <!-- RANK -->
-  <div class="tab sheet" id="tab-rank"><div class="sheet-inner" id="rankBody"></div></div>
+  <div class="tab sheet" id="tab-rank"><div class="sheet-head"><b>🏆 RANK</b><button class="sheet-x" aria-label="Close">✕</button></div><div class="sheet-inner" id="rankBody"></div></div>
 
   <nav class="navbar" id="navbar">
     <button data-tab="shop"><span>🛒</span><small>SHOP</small></button>
@@ -119,9 +121,9 @@
       <div class="sp-side op"><b id="sbOp">0</b><i class="av" id="sbOpAv">OPP</i></div>
     </div>
     <div class="earned" id="earned"><b class="coin"></b><span>0</span></div>
-    <button class="hud-inspect" id="inspectBtn" aria-label="Inspect knife"><svg viewBox="0 0 24 24"><path d="M3 17l9-9 3 3-9 9H3z" fill="currentColor"/><path d="M14 6l2-2 4 4-2 2z" fill="currentColor"/><path d="M19 13a5 5 0 01-2 4M17 2a5 5 0 014 2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></button>
   </div>
   <div class="killfeed" id="killfeed"></div>
+  <button class="desk-inspect" id="inspectDesk">✦ <b>F</b> INSPECT</button>
   <div class="crosshair"><i></i><i></i><i></i><i></i></div>
   <div class="hitmark" id="hitmark"></div>
   <div class="combo" id="combo"></div>
@@ -139,6 +141,7 @@
   <div class="joy" id="joy"><i></i></div>
   <div class="actions" id="actions">
     <button class="act fin" id="finBtn"><span>💀</span><small>FINISH</small></button>
+    <button class="act inspect" id="inspectBtn" aria-label="Inspect knife"><span>✦</span><small>INSPECT</small></button>
     <button class="act dash" id="dashBtn"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" class="cd" id="dashRing"/></svg><span>»</span></button>
     <button class="act jump" id="jumpBtn"><span>⤒</span><small>JUMP</small></button>
   </div>

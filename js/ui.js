@@ -42,14 +42,32 @@ const HINTS = [
   { id: 'jump', touch: 'Tap <b>JUMP</b> — climb crates & cars', desk: '<b>Space</b> to jump — climb crates & cars', icon: '⤒', hy: '-6px' },
   { id: 'dash', touch: '<b>Double-swipe</b> right side to dash-dodge', desk: '<b>Double-tap A/D/S</b> or <b>Q</b> to dash', icon: '⇇', hx: '-8px', hy: '0px' },
   { id: 'sprint', touch: 'Push the stick <b>all the way up</b> to sprint', desk: 'Hold <b>Shift</b> to sprint', icon: '⇈', hy: '-8px' },
-  { id: 'inspect', touch: 'Tap <b>✦</b> top-right to flex your knife', desk: 'Press <b>F</b> to inspect your knife', icon: '✦', hy: '-4px' },
+  { id: 'inspect', touch: 'Tap <b>✦ INSPECT</b> to flex your knife', desk: 'Press <b>F</b> to inspect your knife', icon: '✦', hy: '-4px' },
 ];
 
 export class UI {
   constructor(app) {
     this.app = app; this.screen = 'loading'; this.tabName = 'home'; this.seg = 'knives'; this.slot = 'top'; this.sel = null;
     $$('.logo-slot').forEach(e => (e.innerHTML = logoSVG()));
-    $$('[data-tab]').forEach(b => b.addEventListener('click', () => { A.uiClick(); this.tab(b.dataset.tab); }));
+    // Hub navigation: tap a tab again, the ✕, swipe the sheet down, tap the 3D scene above it, or press Esc → back home.
+    $$('[data-tab]').forEach(b => b.addEventListener('click', () => { A.uiClick(); vibe(8); const t = b.dataset.tab; this.tab(t === this.tabName && t !== 'home' ? 'home' : t); }));
+    $$('.sheet-x').forEach(b => b.addEventListener('click', () => { A.uiClick(); this.tab('home'); }));
+    $$('.sheet-head').forEach(hd => {
+      let y0 = null; const sheet = hd.closest('.sheet');
+      hd.addEventListener('pointerdown', e => { if (e.target.closest('.sheet-x')) return; y0 = e.clientY; sheet.classList.add('dragging'); hd.setPointerCapture?.(e.pointerId); });
+      hd.addEventListener('pointermove', e => { if (y0 == null) return; const dy = Math.max(0, e.clientY - y0); sheet.style.transform = `translateY(${dy}px)`; });
+      const end = e => { if (y0 == null) return; const dy = e.clientY - y0; y0 = null; sheet.classList.remove('dragging'); sheet.style.transform = ''; if (dy > 70) { A.uiClick(); this.tab('home'); } };
+      hd.addEventListener('pointerup', end); hd.addEventListener('pointercancel', end);
+    });
+    let gx = null;
+    $('#gl').addEventListener('pointerdown', e => { gx = [e.clientX, e.clientY]; });
+    $('#gl').addEventListener('pointerup', e => {
+      const tap = gx && Math.hypot(e.clientX - gx[0], e.clientY - gx[1]) < 8; gx = null;
+      if (!tap || this.screen !== 'lobby') return;
+      if (this.tabName !== 'home') this.tab('home');
+      else if (!profile.learned.flex) { profile.learned.flex = true; save(); $('#tapHint').style.display = 'none'; }
+    });
+    addEventListener('keydown', e => { if (e.key !== 'Escape') return; if ($('#modal').classList.contains('show')) this.closeModal(); else if (this.screen === 'lobby' && this.tabName !== 'home') this.tab('home'); });
     $('#playBtn').addEventListener('click', () => { A.uiClick(); vibe(20); app.queue(); });
     $('#chestBtn').addEventListener('click', () => { A.uiClick(); profile.chests > 0 ? this.openChest(true) : this.tab('shop'); });
     $('#dailyBtn').addEventListener('click', () => { A.uiClick(); this.daily(); });
@@ -63,6 +81,8 @@ export class UI {
     tapBtn('#dashBtn', () => app.input.emit('dash', { dir: 'auto' }));
     tapBtn('#finBtn', () => app.input.emit('double'));
     tapBtn('#inspectBtn', () => app.input.emit('inspect'));
+    tapBtn('#inspectDesk', () => app.input.emit('inspect'));
+    $('#modal').addEventListener('click', e => { if (e.target.id === 'modal' && this.modalDismiss) { A.uiClick(); this.closeModal(); } });
     $('#reveal').addEventListener('pointerdown', e => { if (e.target.closest('button')) return; app.reveal.tap(); });
     if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
   }
@@ -131,6 +151,10 @@ export class UI {
     const claimable = profile.quests.list.filter(q => q.prog >= q.goal && !q.claimed).length;
     badge('#questBadge', claimable);
     badge('#shopBadge', profile.seen.shop !== profile.shop.date ? 'NEW' : 0);
+    const it = equippedItem();
+    $('#heroPlate').innerHTML = `<div class="hp-row" style="--rc:${r.color}">${rankEmblem(r.idx, 40)}<div><b>${r.name.toUpperCase()}</b><br><small>LV ${profile.level} · ${profile.wins}W ${profile.losses}L</small></div></div><div class="kn" style="--kc:${rc(itemRarity(it))}">🔪 ${itemName(it)}</div>`;
+    $('#tapHint').style.display = profile.learned.flex ? 'none' : '';
+    this.app.menu?.setRankColor?.(r.color);
     const pips = [...Array(WIN_CHEST_WINS)].map((_, i) => `<i class="${i < profile.winChest ? 'on' : ''}"></i>`).join('');
     $('#winChest').innerHTML = `<span class="chest-ico" style="width:22px;height:18px"></span><span class="pips">${pips}</span><span>WIN ${WIN_CHEST_WINS - profile.winChest} MORE FOR A CHEST</span>`;
   }
@@ -146,7 +170,6 @@ export class UI {
         <div class="odds">${RARITY_ORDER.map(k => `<span style="border-color:${rc(k)}">${RARITY[k].short} ${(RARITY[k].weight / total * 100).toFixed(1)}%</span>`).join('')}</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn gold small" id="buyChest" ${profile.coins < CHEST_PRICE ? 'disabled' : ''}><b class="coin" style="width:14px;height:14px;vertical-align:-2px"></b> ${CHEST_PRICE}</button>
         ${profile.chests ? `<button class="btn green small" id="openOwned">OPEN (${profile.chests})</button>` : ''}</div></div></div>
-      <div id="shopDetail"></div>
       <h3>🔥 DAILY DRIP <span class="timer">NEW IN ${hh}h ${mm}m</span></h3><div class="grid" id="dripGrid"></div>
       <h3>💀 FINISHERS</h3><div class="grid" id="finGrid"></div>`;
     $('#buyChest').onclick = () => { if (profile.coins < CHEST_PRICE) return; profile.coins -= CHEST_PRICE; save(); A.coin(); this.openChest(false); };
@@ -155,41 +178,64 @@ export class UI {
     Object.entries(FINISHERS).forEach(([id, f]) => {
       const owned = profile.finishers.includes(id);
       const c = h(`<button class="card ${owned ? 'eq' : 'locked'}" style="--r:${rc(f.rarity)}"><div class="glyph">${f.icon}</div><div class="nm">${f.name}</div><div class="sk">${owned ? 'OWNED' : RARITY[f.rarity].short}</div>${owned ? '' : `<span class="price"><b class="coin"></b>${fmt(f.price)}</span>`}</button>`);
-      c.onclick = () => { A.uiClick(); this.finDetail(id, $('#shopDetail')); };
+      c.onclick = () => { A.uiClick(); this.finTap(id); };
       $('#finGrid').append(c);
     });
   }
+  // Thumbnails render one per tick so tabs open instantly and fill in progressively.
+  queueThumb(img, fn) {
+    (this.tq ??= []).push([img, fn]);
+    if (this.tqRun) return; this.tqRun = true;
+    const step = () => { const job = this.tq.shift(); if (!job) { this.tqRun = false; return; } if (job[0].isConnected) job[0].src = job[1](); setTimeout(step, 0); };
+    setTimeout(step, 16);
+  }
   dripCard(id, shop) {
     const d = DRIP[id], owned = profile.drip.includes(id), eq = profile.outfit[d.slot] === id;
-    const slot = SLOTS.find(s => s.id === d.slot);
-    const c = h(`<button class="card ${eq ? 'eq' : ''} ${owned ? '' : 'locked'} ${this.sel === id ? 'sel' : ''}" style="--r:${rc(d.rarity)}">
-      <img class="dimg" src="${this.app.thumbs.drip({ ...profile.outfit, [d.slot]: id }, d.slot)}" alt="">
-      <div class="nm">${d.name}</div><div class="sk">${RARITY[d.rarity].short}</div>${owned ? '' : `<span class="price"><b class="coin"></b>${fmt(d.price)}</span>`}</button>`);
-    c.onclick = () => { A.uiClick(); this.sel = id; this.dripDetail(id, shop ? $('#shopDetail') : $('#lockerDetail')); $$('.card.sel').forEach(x => x.classList.remove('sel')); c.classList.add('sel'); };
+    const c = h(`<button class="card ${eq ? 'eq' : ''} ${owned ? '' : 'locked'}" style="--r:${rc(d.rarity)}">
+      <img class="dimg" alt=""><div class="nm">${d.name}</div><div class="sk">${RARITY[d.rarity].short}</div>${owned ? '' : `<span class="price"><b class="coin"></b>${fmt(d.price)}</span>`}</button>`);
+    this.queueThumb(c.querySelector('img'), () => this.app.thumbs.drip({ ...profile.outfit, [d.slot]: id }, d.slot));
+    c.onclick = () => {
+      A.uiClick();
+      if (!shop && owned) { // locker: tap to wear, instantly
+        if (eq) return;
+        profile.outfit[d.slot] = id; save(); A.claim(); vibe(15);
+        $$('#lockerGrid .card.eq').forEach(x => x.classList.remove('eq')); c.classList.add('eq');
+        this.lockerWearing(); requestAnimationFrame(() => this.app.loadoutChanged());
+      } else this.itemPopup('drip', id);
+    };
     return c;
   }
-  dripDetail(id, el) {
-    const d = DRIP[id], owned = profile.drip.includes(id), eq = profile.outfit[d.slot] === id;
-    this.app.previewOutfit({ ...profile.outfit, [d.slot]: id });
-    if (this.tabName === 'shop') this.app.menuMode(['head', 'face'].includes(d.slot) ? 'head' : ['legs', 'kicks'].includes(d.slot) ? 'legs' : 'body');
-    el.innerHTML = '';
-    const box = h(`<div class="detail"><div class="dt"><h4>${d.name}</h4><div class="rar" style="color:${rc(d.rarity)}">${RARITY[d.rarity].short} · ${SLOTS.find(s => s.id === d.slot).name.toUpperCase()}</div><div class="meta">${owned ? (eq ? 'Wearing it.' : 'In your locker.') : 'Previewing on your character — tap BUY to cop.'}</div><div class="row"></div></div></div>`);
-    const row = box.querySelector('.row');
-    if (owned) {
-      const b = h(`<button class="btn small ${eq ? '' : 'green'}" ${eq ? 'disabled' : ''}>${eq ? 'EQUIPPED' : 'EQUIP'}</button>`);
-      b.onclick = () => { profile.outfit[d.slot] = id; save(); A.claim(); vibe(15); this.app.loadoutChanged(); this.rerender(); };
-      row.append(b);
-    } else {
-      const b = h(`<button class="btn gold small" ${profile.coins < d.price ? 'disabled' : ''}><b class="coin" style="width:14px;height:14px;vertical-align:-2px"></b> ${fmt(d.price)}</button>`);
-      b.onclick = () => {
-        if (profile.coins < d.price) return;
-        profile.coins -= d.price; profile.drip.push(id); profile.outfit[d.slot] = id; save();
-        A.reveal(RARITY_ORDER.indexOf(d.rarity)); vibe([20, 30, 40]); this.flash(); this.celebrate(rc(d.rarity), d.rarity === 'gold'); this.gToast(`🔥 <b>${d.name}</b> copped & equipped`);
-        this.app.loadoutChanged(); this.app.menu.emote(); this.rerender(); this.refreshLobby();
-      };
-      row.append(b);
-    }
-    el.append(box);
+  lockerWearing() {
+    const el = $('#lockerDetail'); if (!el) return;
+    const d = DRIP[profile.outfit[this.slot]];
+    el.innerHTML = `<div class="detail"><div class="dt"><h4>${this.slot === 'skin' ? 'Skin tone' : `Wearing: ${d?.name || '—'}`}</h4><div class="meta">Tap anything you own to wear it. Locked items open a preview to buy.</div></div></div>`;
+  }
+  // Clash-style item popup: big preview + one obvious button.
+  itemPopup(kind, id) {
+    const isDrip = kind === 'drip', it = isDrip ? DRIP[id] : FINISHERS[id];
+    const owned = isDrip ? profile.drip.includes(id) : profile.finishers.includes(id);
+    const eq = isDrip ? profile.outfit[it.slot] === id : profile.equipped.finisher === id;
+    const short = profile.coins < it.price;
+    const art = isDrip ? `<img class="pop-img" src="${this.app.thumbs.drip({ ...profile.outfit, [it.slot]: id }, it.slot, 360, 300)}" alt="">` : `<div class="pop-icon">${it.icon}</div>`;
+    const sub = isDrip ? SLOTS.find(x => x.id === it.slot).name.toUpperCase() : 'FINISHER';
+    this.modal(`<div class="pop" style="--r:${rc(it.rarity)}"><span class="rr">${RARITY[it.rarity].short} · ${sub}</span>${art}<h2>${it.name}</h2>
+      <p>${isDrip ? (owned ? (eq ? 'You\'re wearing this.' : 'In your locker.') : 'Cop it and it goes straight on.') : it.desc + ' Double tap when they\'re under 40 HP.'}</p>
+      <div class="row"><button class="btn ghost" id="pClose">CLOSE</button>${owned ? `<button class="btn green" id="pAct" ${eq ? 'disabled' : ''}>${eq ? 'EQUIPPED' : 'EQUIP'}</button>` : `<button class="btn gold" id="pAct" ${short ? 'disabled' : ''}><b class="coin" style="vertical-align:-3px"></b> ${fmt(it.price)}</button>`}</div>
+      ${!owned && short ? `<small class="need">Need ${fmt(it.price - profile.coins)} more coins — win matches & clear quests</small>` : ''}</div>`, true);
+    $('#pClose').onclick = () => { A.uiClick(); this.closeModal(); };
+    $('#pAct').onclick = () => {
+      if (!owned) {
+        if (profile.coins < it.price) return;
+        profile.coins -= it.price; (isDrip ? profile.drip : profile.finishers).push(id);
+        A.reveal(RARITY_ORDER.indexOf(it.rarity)); vibe([20, 30, 40]); this.flash(); this.celebrate(rc(it.rarity), it.rarity === 'gold');
+        this.gToast(isDrip ? `🔥 <b>${it.name}</b> copped & equipped` : `💀 <b>${it.name}</b> unlocked`);
+      } else A.claim();
+      if (isDrip) profile.outfit[it.slot] = id; else profile.equipped.finisher = id;
+      save(); this.closeModal();
+      const sheet = document.querySelector('.tab.show .sheet-inner'), top = sheet?.scrollTop;
+      this.rerender(); this.refreshLobby(); if (sheet) document.querySelector('.tab.show .sheet-inner').scrollTop = top;
+      if (isDrip) requestAnimationFrame(() => { this.app.loadoutChanged(); this.app.menu.emote(); });
+    };
   }
   rerender() { if (this.tabName === 'shop') this.renderShop(); else if (this.tabName === 'locker') this.renderLocker(); }
 
@@ -204,8 +250,9 @@ export class UI {
       const inv = [...profile.inventory].sort((a, b) => RARITY_ORDER.indexOf(itemRarity(b)) - RARITY_ORDER.indexOf(itemRarity(a)));
       this.sel = profile.inventory.some(i => i.id === this.sel) ? this.sel : equippedItem().id;
       inv.forEach(it => {
-        const c = h(`<button class="card ${it.id === profile.equipped.item ? 'eq' : ''} ${it.id === this.sel ? 'sel' : ''}" style="--r:${rc(itemRarity(it))}"><img src="${T.knife(it, 200, 100)}" alt=""><div class="nm">${KNIVES[it.knife].name}</div><div class="sk">${SKINS[it.skin].name}</div></button>`);
-        c.onclick = () => { A.uiClick(); this.sel = it.id; this.knifeDetail(it); $$('.card.sel').forEach(x => x.classList.remove('sel')); c.classList.add('sel'); };
+        const c = h(`<button class="card ${it.id === profile.equipped.item ? 'eq' : ''} ${it.id === this.sel ? 'sel' : ''}" style="--r:${rc(itemRarity(it))}"><img alt=""><div class="nm">${it.trak != null ? '<i class="trak">ST</i>' : ''}${KNIVES[it.knife].name}</div><div class="sk">${SKINS[it.skin].name}</div></button>`);
+        this.queueThumb(c.querySelector('img'), () => T.knife(it, 200, 100));
+        c.onclick = () => { A.uiClick(); this.sel = it.id; this.knifeDetail(it); $$('.card.sel').forEach(x => x.classList.remove('sel')); c.classList.add('sel'); $('#lockerBody').scrollTo({ top: 0, behavior: 'smooth' }); };
         grid.append(c);
       });
       this.knifeDetail(profile.inventory.find(i => i.id === this.sel));
@@ -222,16 +269,16 @@ export class UI {
       } else {
         const ids = Object.keys(DRIP).filter(k => DRIP[k].slot === this.slot).sort((a, b) => (profile.drip.includes(b) - profile.drip.includes(a)) || RARITY_ORDER.indexOf(DRIP[a].rarity) - RARITY_ORDER.indexOf(DRIP[b].rarity));
         ids.forEach(id => grid.append(this.dripCard(id, false)));
-        this.dripDetail(this.sel && DRIP[this.sel]?.slot === this.slot ? this.sel : profile.outfit[this.slot], $('#lockerDetail'));
+        this.lockerWearing();
       }
     } else {
       Object.entries(FINISHERS).forEach(([id, f]) => {
         const owned = profile.finishers.includes(id);
         const card = h(`<button class="card ${id === profile.equipped.finisher ? 'eq' : ''} ${owned ? '' : 'locked'}" style="--r:${rc(f.rarity)}"><div class="glyph">${f.icon}</div><div class="nm">${f.name}</div><div class="sk">${owned ? RARITY[f.rarity].short : ''}</div>${owned ? '' : `<span class="price"><b class="coin"></b>${fmt(f.price)}</span>`}</button>`);
-        card.onclick = () => { A.uiClick(); this.finDetail(id, $('#lockerDetail')); };
+        card.onclick = () => { A.uiClick(); this.finTap(id); };
         grid.append(card);
       });
-      this.finDetail(profile.equipped.finisher, $('#lockerDetail'));
+      $('#lockerDetail').innerHTML = `<div class="detail"><div style="font-size:34px">${FINISHERS[profile.equipped.finisher].icon}</div><div class="dt"><h4>${FINISHERS[profile.equipped.finisher].name}</h4><div class="meta">Equipped. Double tap when they're under 40 HP. Tap another to swap.</div></div></div>`;
     }
     this.app.menuMode(this.lockerCam());
   }
@@ -253,15 +300,10 @@ export class UI {
       row.append(sell);
     }
   }
-  finDetail(id, el) {
-    const f = FINISHERS[id], owned = profile.finishers.includes(id), eq = id === profile.equipped.finisher;
-    el.innerHTML = `<div class="detail"><div style="font-size:40px">${f.icon}</div><div class="dt"><h4>${f.name}</h4><div class="rar" style="color:${rc(f.rarity)}">${RARITY[f.rarity].short} FINISHER</div><div class="meta">${f.desc} Double tap when they're under 40 HP.</div><div class="row"></div></div></div>`;
-    const b = owned ? h(`<button class="btn small ${eq ? '' : 'green'}" ${eq ? 'disabled' : ''}>${eq ? 'EQUIPPED' : 'EQUIP'}</button>`) : h(`<button class="btn gold small" ${profile.coins < f.price ? 'disabled' : ''}><b class="coin" style="width:14px;height:14px;vertical-align:-2px"></b> ${fmt(f.price)}</button>`);
-    b.onclick = () => {
-      if (!owned) { if (profile.coins < f.price) return; profile.coins -= f.price; profile.finishers.push(id); A.reveal(RARITY_ORDER.indexOf(f.rarity)); this.flash(); this.celebrate(rc(f.rarity)); this.gToast(`💀 <b>${f.name}</b> unlocked`); } else A.claim();
-      profile.equipped.finisher = id; save(); this.rerender(); this.refreshLobby();
-    };
-    el.querySelector('.row').append(b);
+  finTap(id) {
+    if (profile.finishers.includes(id) && this.tabName === 'locker') {
+      profile.equipped.finisher = id; save(); A.claim(); vibe(15); this.renderLocker();
+    } else this.itemPopup('fin', id);
   }
 
   // ---------- QUESTS / LEVEL ROAD ----------
@@ -438,7 +480,7 @@ export class UI {
     $('#sbMe').textContent = score[0]; $('#sbOp').textContent = score[1];
     const r = $('#roundRes');
     const txt = res === 'win' ? 'ROUND WON' : res === 'lose' ? 'ROUND LOST' : 'DRAW';
-    const why = { finisher: 'Finisher', backstab: 'Backstab', air: 'Air shank', slash1: 'Slashed', slash2: 'Slashed', stab: 'Stabbed', heavy: 'Heavy stab', Time: 'Time ran out' }[reason] || '';
+    const why = { traffic: 'Roadkill 🚗', finisher: 'Finisher', backstab: 'Backstab', air: 'Air shank', slash1: 'Slashed', slash2: 'Slashed', stab: 'Stabbed', heavy: 'Heavy stab', Time: 'Time ran out' }[reason] || '';
     r.innerHTML = `<h2 style="color:${res === 'win' ? '#6fb0ff' : res === 'lose' ? '#ff3355' : '#fff'}">${txt}</h2><p>${why}${over ? '' : ` · ${score[0]} – ${score[1]}`}</p>`;
     setTimeout(() => { r.classList.remove('on'); void r.offsetWidth; r.classList.add('on'); }, 650);
     vibe(res === 'win' ? [30, 50, 30] : 80);
@@ -476,7 +518,8 @@ export class UI {
   dashFx() { const s = $('#speedlines'); s.classList.add('dash'); clearTimeout(this._dT); this._dT = setTimeout(() => s.classList.remove('dash'), 180); }
   sprintFx(on) { $('#speedlines').classList.toggle('sprint', on); }
   killfeed(a, b, item, how) {
-    const kf = h(`<div class="kf"><span class="${a === 'You' ? 'me' : 'op'}">${a}</span><img src="${this.app.thumbs.knife(item, 100, 50)}" alt="">${['finisher', 'backstab', 'air'].includes(how) ? `<em>${how.toUpperCase()}</em>` : ''}<span class="${b === 'You' ? 'me' : 'op'}">${b}</span></div>`);
+    const icon = how === 'traffic' ? '<span style="font-size:16px">🚗</span>' : `<img src="${this.app.thumbs.knife(item, 100, 50)}" alt="">`;
+    const kf = h(`<div class="kf"><span class="${a === 'You' ? 'me' : 'op'}">${a}</span>${icon}${['finisher', 'backstab', 'air', 'traffic'].includes(how) ? `<em>${how === 'traffic' ? 'ROADKILL' : how.toUpperCase()}</em>` : ''}<span class="${b === 'You' ? 'me' : 'op'}">${b}</span></div>`);
     $('#killfeed').prepend(kf); setTimeout(() => kf.remove(), 6000);
   }
   joy(j, dx, dy, sprint) {
@@ -510,7 +553,11 @@ export class UI {
       if (R.levels.length) setTimeout(() => { e.querySelector('small').textContent = `LEVEL ${profile.level}`; A.levelUp(); this.flash(); vibe([30, 50, 80]); e.querySelector('b').innerHTML = `LEVEL UP! <span style="color:#ffcc33">${R.levelRewards.join(' · ')}</span>`; }, 1100);
     });
     if (R.win) steps.push(() => {
-      const pips = [...Array(WIN_CHEST_WINS)].map((_, i) => `<i style="display:inline-block;width:26px;height:12px;border-radius:6px;margin-right:4px;border:2px solid #050a24;background:${i < (R.chestEarned ? WIN_CHEST_WINS : profile.winChest) ? '#ffcc33' : 'rgba(255,255,255,.15)'}"></i>`).join('');
+      const it = equippedItem();
+    $('#heroPlate').innerHTML = `<div class="hp-row" style="--rc:${r.color}">${rankEmblem(r.idx, 40)}<div><b>${r.name.toUpperCase()}</b><br><small>LV ${profile.level} · ${profile.wins}W ${profile.losses}L</small></div></div><div class="kn" style="--kc:${rc(itemRarity(it))}">🔪 ${itemName(it)}</div>`;
+    $('#tapHint').style.display = profile.learned.flex ? 'none' : '';
+    this.app.menu?.setRankColor?.(r.color);
+    const pips = [...Array(WIN_CHEST_WINS)].map((_, i) => `<i style="display:inline-block;width:26px;height:12px;border-radius:6px;margin-right:4px;border:2px solid #050a24;background:${i < (R.chestEarned ? WIN_CHEST_WINS : profile.winChest) ? '#ffcc33' : 'rgba(255,255,255,.15)'}"></i>`).join('');
       row('🧰', 'WIN CHEST', R.chestEarned ? 'CHEST EARNED!' : `${profile.winChest} / ${WIN_CHEST_WINS}`, `<div>${pips}</div>`);
       if (R.chestEarned) { A.reveal(3); vibe([30, 40, 60]); }
     });
@@ -528,7 +575,7 @@ export class UI {
   }
 
   // ---------- MODALS ----------
-  modal(html) { $('#modalBox').innerHTML = html; this.overlay('modal', true); }
+  modal(html, dismissable = true) { $('#modalBox').innerHTML = html; this.modalDismiss = dismissable; this.overlay('modal', true); }
   closeModal() { this.overlay('modal', false); }
   confirm(msg, yes) {
     this.modal(`<h2>SURE?</h2><p style="text-align:center;margin:0">${msg}</p><div class="row"><button class="btn ghost" id="mNo">NAH</button><button class="btn green" id="mYes">YES</button></div>`);
@@ -573,7 +620,7 @@ export class UI {
       <div class="controls-list">${touch
         ? '<b>Left stick</b> move · push <b>fully up</b> or <b>double-flick up</b> to sprint<br><b>Right drag</b> look · <b>Tap/swipe</b> shank · <b>Double tap</b> finisher<br><b>Double-swipe</b> dash · <b>JUMP</b> to climb · <b>✦</b> inspect'
         : '<b>WASD</b> move · <b>Mouse</b> look · <b>Space</b> jump · <b>Shift</b> sprint<br><b>LMB</b> shank · <b>Double-click/E</b> finisher · <b>RMB</b> heavy<br><b>Q</b> or <b>double-tap A/S/D</b> dash · <b>F</b> inspect'}</div>
-      <small style="text-align:center;opacity:.5">Shankmaster v0.3 · test build</small>
+      <small style="text-align:center;opacity:.5">Shankmaster v0.4 · test build</small>
       <div class="row">${inMatch ? '<button class="btn red" id="mQuit">FORFEIT</button><button class="btn green" id="mResume">RESUME</button>' : '<button class="btn ghost small" id="mTut">REPLAY TUTORIAL</button><button class="btn green" id="mClose">DONE</button>'}</div>`);
     $('#sQ').value = s.quality;
     $('#sSens').oninput = e => { s.sens = +e.target.value; this.app.input.sens = s.sens; save(); };
