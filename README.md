@@ -19,3 +19,11 @@ Run locally: `python3 devserver.py 8643` then open http://localhost:8643
 - `js/data.js` — items, drip, quests, levels, profile (localStorage)
 
 Install on iPhone: open the site in Safari → Share → Add to Home Screen (runs fullscreen).
+
+## Online play
+
+- Transport: Supabase Realtime (WebSocket relay) — `js/netconfig.js` holds the project URL + publishable key. Only Realtime channels are used (no tables), so pointing at a different Supabase project is just changing those two values.
+- Matchmaking (`js/net.js`): players join the `shankmaster-lobby-v1` presence channel; waiting players are paired oldest-first, the lower id invites, the other accepts, both move to a private `sm-m-<id>` channel. After `searchSeconds` with nobody around, you get an AI opponent instead.
+- In a match (`js/game.js`): each client simulates its own fighter and sends a snapshot 20×/s; the opponent is rendered ~110 ms in the past with interpolation. The attacker detects hits on their screen and sends `hit`; the victim applies damage to themselves and announces `dead`. The host owns rounds (`round` with spawns + a shared seed for pickups/traffic) and time-outs (`rend`). `bye`/presence leave/7 s silence = the other player wins.
+- Bump `protocol` / `lobby` in `netconfig.js` whenever the netcode changes so old and new clients don't get paired.
+- Test: open the game in two browser windows (or two phones) and press PLAY on both within ~20 s.

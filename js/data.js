@@ -268,6 +268,8 @@ function load() {
   } catch (e) { /* storage blocked */ }
   return freshProfile();
 }
+// Online needs a display name: give new players a London-flavoured one they can change in settings.
+if (!profile.name || profile.name === 'You') { profile.name = botName(); }
 export function save() { try { localStorage.setItem(KEY, JSON.stringify(profile)); } catch (e) { /* ignore */ } }
 export const equippedItem = () => profile.inventory.find(i => i.id === profile.equipped.item) || profile.inventory[0];
 

@@ -1,7 +1,7 @@
 // First-person arm + knife, rendered in its own scene on top of the world (like CS viewmodels).
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { buildKnife, setKnifeBlood, knifeTrick, TRICK_CLICKS } from './knives.js';
+import { buildKnife, setKnifeBlood } from './knives.js';
 import * as A from './audio.js';
 import { toon, outfitLook, outlineMat } from './characters.js';
 
@@ -70,6 +70,7 @@ function ink(geo, mat, parent, pos = [0, 0, 0], rot, scale) {
 const seg = (t, a, b) => Math.max(0, Math.min(1, (t - a) / (b - a)));
 const bump = (t, a, b) => Math.sin(Math.PI * seg(t, a, b));
 const ease = x => x * x * (3 - 2 * x);
+const backEase = t => { const c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
 // Handle half-thickness per knife: the fingers wrap a circle just outside it.
 const HANDLE_R = { shank: 0.0145, karambit: 0.016, talon: 0.018, butterfly: 0.0125, bayonet: 0.0135, huntsman: 0.0175, skeleton: 0.0125, flip: 0.0145 };
 const FINGERS = [ // index → pinky: x along the handle, length scale
@@ -168,16 +169,10 @@ export class ViewModel {
     this.play('draw', 0.75);
   }
   play(name, dur, onHit, hitAt = 0.45) {
-    if (name === 'inspect' && this.anim && this.anim.name !== 'inspect') return;
+    if (name === 'inspect' && this.anim) return; // don't restart / don't interrupt attacks
     this.anim = { name, t: 0, dur, onHit, hitAt, fired: false };
   }
-  cancel() { if (this.anim && this.anim.name !== 'fin') { this.anim = null; knifeTrick(this.knife, 0, 'none'); this.applyTrick([0, 0, 0]); } }
-  // rotate the knife (in the grip frame) around its trick pivot: finger ring for karambits, grip otherwise
-  applyTrick([x, y, z]) {
-    const p = this.knife.userData.spinPivot, q = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
-    this.knife.quaternion.copy(q);
-    this.knife.position.copy(p).sub(p.clone().applyQuaternion(q));
-  }
+  cancel() { if (this.anim && this.anim.name !== 'fin') this.anim = null; } // the knife and hand blend back on their own
   setTrak(n) { this.knife.userData.setTrak?.(n); }
   playFinisher(style, dur, onHit, hits) {
     const seq = FIN[style] || FIN.stitch;
@@ -188,64 +183,104 @@ export class ViewModel {
   flashHit() { this.hitLight.color.setHex(0xff0000); this.hitLight.intensity = 6; }
   flashColor(c) { this.hitLight.color.setHex(c); this.hitLight.intensity = 5; }
 
-  // What the hand should be doing right now: finger curls (0 open → 1 gripping), thumb, flick, wrist rotation.
-  handTargets() {
-    const a = this.anim, T = this.time, type = this.item.knife;
-    let curl = [1, 1, 1, 1], thumb = 1, flick = 0, wx = Math.sin(T * 1.3) * 0.035, wy = 0, wz = Math.sin(T * 0.9) * 0.025;
-    // idle: every few seconds the fingers re-grip in a little pinky→index wave
-    const ph = T % 4.2;
-    if (ph < 0.6) curl = curl.map((c, i) => c - 0.22 * bump(ph, 0.05 + (3 - i) * 0.08, 0.3 + (3 - i) * 0.08));
-    if (!a) return { curl, thumb, flick, w: [wx, wy, wz] };
+  // ---------- choreography ----------
+  // Returns everything the hand + knife should be doing right now. Tricks never spin the knife inside a closed
+  // fist: the fingers open, the knife is tossed clear of the hand (or held out in front for ring spins),
+  // and the fingers snap shut on the catch — like CS inspects.
+  choreo() {
+    const a = this.anim, T = this.time, type = this.item.knife, Q = new THREE.Quaternion(), E = new THREE.Euler();
+    const out = { curl: [1, 1, 1, 1], thumb: 1, flick: 0, w: [Math.sin(T * 1.3) * 0.03, 0, Math.sin(T * 0.9) * 0.02], kp: new THREE.Vector3(), kq: Q, rig: { bite: 0, safe: 0, flip: 0 }, sounds: [], live: false };
+    const ph = T % 4.2; // idle: a little pinky→index re-grip every few seconds
+    if (ph < 0.6) out.curl = out.curl.map((c, i) => c - 0.2 * bump(ph, 0.05 + (3 - i) * 0.08, 0.3 + (3 - i) * 0.08));
+    if (!a) return out;
     const t = Math.min(1, a.t);
+    const toss = (s, height, axis, turns, pivot) => { // knife in the air, clear of the fingers
+      const k = Math.sin(Math.PI * s);
+      out.kp.set(0, height * k, -0.04 * k);
+      E.set(axis === 'x' ? turns * 2 * Math.PI * ease(s) : 0, 0, axis === 'z' ? turns * 2 * Math.PI * ease(s) : 0); Q.setFromEuler(E);
+      if (pivot) out.kp.add(pivot.clone().sub(pivot.clone().applyQuaternion(Q)));
+    };
+    const release = (o) => { out.curl = out.curl.map((c, i) => Math.min(c, 1 - 0.95 * o + 0.05 * i * o)); out.thumb = Math.min(out.thumb, 1 - 0.8 * o); };
+    const catchSnap = (t0) => { out.curl = out.curl.map((c, i) => c + 0.14 * bump(t, t0 + (3 - i) * 0.01, t0 + 0.07 + (3 - i) * 0.01)); out.w[0] += 0.22 * bump(t, t0, t0 + 0.1); };
     if (a.name === 'draw') {
-      curl = curl.map((_, i) => ease(seg(t, 0.15 + (3 - i) * 0.07, 0.45 + (3 - i) * 0.07)));
-      thumb = ease(seg(t, 0.3, 0.7)); wy = -0.9 * bump(t, 0, 0.8); wx -= 0.4 * bump(t, 0, 0.6);
-    } else if (a.name === 'inspect') {
-      if (type === 'butterfly') {
-        const on = seg(t, 0.03, 0.08) * (1 - seg(t, 0.86, 0.93));
-        curl = curl.map((c, i) => c * (1 - on) + on * (0.5 + 0.38 * Math.sin(2 * Math.PI * t * 7 - i * 0.7)));
-        thumb = 1 - on * 0.6; wx = 0.5 * Math.sin(2 * Math.PI * t * 2) * on; wy = 0.15 * Math.sin(2 * Math.PI * t * 1.5) * on; wz += 0.22 * Math.sin(2 * Math.PI * t * 3.5) * on;
-      } else if (type === 'flip') {
-        curl[0] = 1 - 0.45 * bump(t, 0.06, 0.24);                          // index pushes the spine to close it
-        const roll = bump(t, 0.28, 0.66); curl = curl.map((c, i) => i === 0 ? c : c - roll * (0.25 + 0.12 * Math.sin(2 * Math.PI * t * 6 - i)));
-        flick = -bump(t, 0.62, 0.72) + 1.2 * bump(t, 0.72, 0.84);          // cock the thumb, then flick it open
-        thumb = 1 - 0.5 * bump(t, 0.6, 0.86);
-        wx = 0.9 * bump(t, 0.3, 0.62) - 0.75 * bump(t, 0.86, 1); wz += 0.2 * bump(t, 0.72, 0.86);
-      } else if (type === 'karambit' || type === 'talon') {
-        const spin = seg(t, 0.1, 0.16) * (1 - seg(t, 0.7, 0.8));
-        curl = curl.map((c, i) => i === 0 ? 0.95 : c * (1 - spin) + spin * 0.12);   // index stays in the ring
-        curl = curl.map((c, i) => i === 0 ? c : c - 0.25 * bump(t, 0.72 + (3 - i) * 0.03, 0.86 + (3 - i) * 0.03));
-        thumb = 1 - 0.7 * spin; wz += 0.2 * bump(t, 0.1, 0.72); wy = 0.2 * spin;
-        wx = -0.85 * bump(t, 0.78, 1);
-      } else { // roll the blade over the fingers, then twist the wrist to show each face
-        const r1 = bump(t, 0.1, 0.45), r2 = bump(t, 0.55, 0.9);
-        curl = curl.map((c, i) => c - (r1 + r2) * (0.32 + 0.14 * Math.sin(2 * Math.PI * t * 5 - i * 0.9)));
-        thumb = 1 - 0.45 * (r1 + r2);
-        wx = 1.0 * bump(t, 0.02, 0.2) - 1.0 * bump(t, 0.45, 0.58) + 0.8 * bump(t, 0.88, 1); wz += 0.15 * (r1 - r2);
-      }
-    } else if (a.name === 'stab' || a.name === 'heavy') { curl = curl.map(() => 1.12); wx += -0.35 * bump(Math.min(1, a.t), 0.25, 0.7); }
-    else if (a.name === 'slash1' || a.name === 'slash2' || a.name === 'fin') {
-      curl = curl.map(() => 1.1); const d = a.name === 'slash2' ? -1 : 1; wz += 0.45 * d * (bump(Math.min(1, a.t), 0.15, 0.4) - bump(Math.min(1, a.t), 0.4, 0.75));
+      out.live = true;
+      out.curl = out.curl.map((_, i) => ease(seg(t, 0.15 + (3 - i) * 0.07, 0.45 + (3 - i) * 0.07)));
+      out.thumb = ease(seg(t, 0.3, 0.7)); out.w[1] = -0.8 * bump(t, 0, 0.8); out.w[0] -= 0.35 * bump(t, 0, 0.6);
+      if (type === 'flip') { out.rig.flip = Math.PI * 0.97 * (1 - backEase(seg(t, 0.35, 0.62))); out.flick = 1.1 * bump(t, 0.35, 0.65); }
+      if (type === 'butterfly') { const o = 1 - backEase(seg(t, 0.2, 0.62)); out.rig.bite = o * Math.PI; out.rig.safe = -o * Math.PI; }
+      return out;
     }
-    return { curl, thumb, flick, w: [wx, wy, wz] };
+    if (a.name !== 'inspect') {
+      if (a.name === 'stab' || a.name === 'heavy') { out.curl = out.curl.map(() => 1.12); out.w[0] -= 0.35 * bump(t, 0.25, 0.7); }
+      else if (a.name === 'slash1' || a.name === 'slash2' || a.name === 'fin') { out.curl = out.curl.map(() => 1.1); const d = a.name === 'slash2' ? -1 : 1; out.w[2] += 0.45 * d * (bump(t, 0.15, 0.4) - bump(t, 0.4, 0.75)); }
+      return out;
+    }
+    out.live = true;
+    const ev = (...ts) => ts.forEach(([tt, kind]) => out.sounds.push([tt, kind]));
+    if (type === 'butterfly') {
+      // in hand: show it · toss 1: rolls with the handles flapping · catch · toss 2: end-over-end · catch
+      const s1 = seg(t, 0.15, 0.42), s2 = seg(t, 0.55, 0.83);
+      if (s1 > 0 && s1 < 1) toss(s1, 0.1, 'x', 1);
+      if (s2 > 0 && s2 < 1) toss(s2, 0.14, 'z', -1);
+      out.rig.bite = 2 * Math.PI * (ease(s1) + ease(s2)); out.rig.safe = -Math.PI * (Math.sin(Math.PI * s1) + Math.sin(Math.PI * s2));
+      release(Math.max(seg(t, 0.12, 0.16) * (1 - seg(t, 0.41, 0.45)), seg(t, 0.52, 0.56) * (1 - seg(t, 0.82, 0.86))));
+      catchSnap(0.42); catchSnap(0.83);
+      out.w[0] += 0.7 * bump(t, 0.43, 0.56); out.w[2] += 0.2 * bump(t, 0.05, 0.16);
+      ev([0.15, 'whoosh'], [0.28, 'click'], [0.42, 'catch'], [0.55, 'whoosh'], [0.69, 'click'], [0.83, 'catch']);
+    } else if (type === 'flip') {
+      // fingers relax, blade folds shut · show it closed · thumb cocks and flicks it open · show the blade
+      const relax = bump(t, 0.1, 0.34);
+      out.curl = out.curl.map((c, i) => c - relax * (i === 0 ? 0.6 : 0.4));
+      const closed = ease(seg(t, 0.13, 0.28)) * (1 - backEase(seg(t, 0.64, 0.73)));
+      out.rig.flip = Math.PI * 0.97 * closed;
+      out.flick = -bump(t, 0.54, 0.64) + 1.25 * bump(t, 0.64, 0.75); out.thumb = 1 - 0.5 * bump(t, 0.52, 0.8);
+      out.w[0] += 0.95 * bump(t, 0.3, 0.56) - 0.85 * bump(t, 0.76, 0.94); out.w[2] += 0.2 * bump(t, 0.63, 0.76);
+      ev([0.28, 'click'], [0.68, 'click'], [0.7, 'shing']);
+    } else if (type === 'karambit' || type === 'talon') {
+      // show it · held out in front of the fingers, it spins twice round the finger ring · back into the fist
+      const s = seg(t, 0.32, 0.72), out1 = bump(t, 0.28, 0.78);
+      E.set(0, 0, -4 * Math.PI * ease(s)); Q.setFromEuler(E);
+      const pv = this.knife.userData.spinPivot;
+      out.kp.set(0, 0.05 * out1, -0.06 * Math.min(1, out1 * 1.6)).add(pv.clone().sub(pv.clone().applyQuaternion(Q)));
+      release(seg(t, 0.28, 0.33) * (1 - seg(t, 0.72, 0.78))); catchSnap(0.74);
+      out.w[0] += 0.9 * bump(t, 0.08, 0.3) - 0.8 * bump(t, 0.78, 0.94); out.w[2] += 0.15 * out1;
+      ev([0.36, 'whoosh'], [0.54, 'whoosh'], [0.74, 'catch']);
+    } else {
+      // show one face, then the other · flick it up end-over-end · catch
+      const s = seg(t, 0.52, 0.8);
+      if (s > 0 && s < 1) toss(s, 0.13, 'z', 1);
+      release(seg(t, 0.49, 0.54) * (1 - seg(t, 0.78, 0.82))); catchSnap(0.8);
+      out.w[0] += 1.05 * bump(t, 0.12, 0.32) - 1.0 * bump(t, 0.3, 0.5) - 0.25 * bump(t, 0.47, 0.56);
+      ev([0.2, 'shing'], [0.52, 'whoosh'], [0.8, 'catch']);
+    }
+    return out;
   }
   poseHand(dt) {
-    const tg = this.handTargets(), k = 1 - Math.exp(-dt * 26);
-    for (let i = 0; i < 4; i++) this.curl[i] += (tg.curl[i] - this.curl[i]) * k;
-    this.thumb += (tg.thumb - this.thumb) * k; this.flick += (tg.flick - this.flick) * Math.min(1, k * 1.5);
-    this.wrist.x += (tg.w[0] - this.wrist.x) * k; this.wrist.y += (tg.w[1] - this.wrist.y) * k; this.wrist.z += (tg.w[2] - this.wrist.z) * k;
+    const c = this.choreo(), k = 1 - Math.exp(-dt * 26);
+    for (let i = 0; i < 4; i++) { const ki = 1 - Math.exp(-dt * (30 - i * 3)); this.curl[i] += (c.curl[i] - this.curl[i]) * ki; } // slight cascade between fingers
+    this.thumb += (c.thumb - this.thumb) * k; this.flick += (c.flick - this.flick) * Math.min(1, k * 1.6);
+    this.wrist.x += (c.w[0] - this.wrist.x) * k; this.wrist.y += (c.w[1] - this.wrist.y) * k; this.wrist.z += (c.w[2] - this.wrist.z) * k;
     this.fingers.forEach((f, i) => {
-      const c = this.curl[i], open = Math.max(0, 1 - c), tight = Math.max(0, c - 1);
-      f.joints.forEach((j, n) => { j.rotation.x = OPEN[n] + (f.grip[n] - OPEN[n]) * Math.min(1, c) - tight * (n ? 0.25 : 0.1); });
+      const cc = this.curl[i], open = Math.max(0, 1 - cc), tight = Math.max(0, cc - 1);
+      f.joints.forEach((j, n) => { j.rotation.x = OPEN[n] + (f.grip[n] - OPEN[n]) * Math.min(1, cc) - tight * (n ? 0.25 : 0.1); });
       f.root.rotation.y = f.spread * open * 1.6;
     });
     const th = this.thumb;
     this.thumbRoot.rotation.set(0.15 + th * 0.35 + this.flick * 0.35, -0.45 + th * 0.85 - this.flick * 0.55, 0);
     this.thumbTip.rotation.y = 0.1 + th * 0.55 - this.flick * 0.3;
-    const a = this.anim, pt = a && a.name === 'inspect' ? ease(seg(a.t, 0, 0.14)) * (1 - ease(seg(a.t, 0.86, 1))) : 0;
-    this.present = pt;
+    // knife: follow the choreography exactly while it's running, otherwise glide home (no snapping on interrupts)
+    const U = this.knife.userData, kk = c.live ? 1 : 1 - Math.exp(-dt * 18);
+    this.knife.position.lerp(c.kp, kk); this.knife.quaternion.slerp(c.kq, kk);
+    if (U.bfPivots) { U.bfPivots[1].rotation.z += (c.rig.bite - U.bfPivots[1].rotation.z) * kk; U.bfPivots[0].rotation.z += (c.rig.safe - U.bfPivots[0].rotation.z) * kk; }
+    if (U.flipPivot) U.flipPivot.rotation.z += (c.rig.flip - U.flipPivot.rotation.z) * kk;
+    // sounds
+    const a = this.anim;
+    if (a) { a.snd ??= 0; c.sounds.sort((x, y) => x[0] - y[0]); while (a.snd < c.sounds.length && a.t >= c.sounds[a.snd][0]) { const kind = c.sounds[a.snd++][1]; if (kind === 'whoosh') A.whoosh(0.5, null, 1.5); else if (kind === 'shing') A.shing(null, 0.08); else { A.flipClick(); if (kind === 'catch') A.land(null, 0.15); } } }
+    // present pose (knife across the screen) blends in/out smoothly, even when an inspect is interrupted
+    const pt = a && a.name === 'inspect' ? ease(seg(a.t, 0, 0.12)) * (1 - ease(seg(a.t, 0.88, 1))) : 0;
+    this.present += (pt - this.present) * (1 - Math.exp(-dt * 14));
     const qe = new THREE.Quaternion().setFromEuler(this.wrist);
-    this.wristG.quaternion.copy(this.baseQ).multiply(qe).slerp(this.presentQ.clone().multiply(qe), pt);
+    this.wristG.quaternion.copy(this.baseQ).multiply(qe).slerp(this.presentQ.clone().multiply(qe), this.present);
   }
   update(dt, { speed = 0, look = { x: 0, y: 0 }, dashing = false, sprint = false, air = false, dip = 0 }) {
     this.time += dt;
@@ -267,11 +302,7 @@ export class ViewModel {
         pose = sample(K[a.name], a.t);
         if (!a.fired && a.t >= a.hitAt) { a.fired = true; a.onHit?.(); }
       }
-      if (a.name === 'inspect' || a.name === 'draw') {
-        this.applyTrick(knifeTrick(this.knife, Math.min(1, a.t), a.name));
-        if (a.name === 'inspect') { const cl = TRICK_CLICKS[this.item.knife] || TRICK_CLICKS.default; a.clicked ??= 0; while (a.clicked < cl.length && a.t >= cl[a.clicked]) { a.clicked++; A.flipClick(); } }
-      }
-      if (a.t >= 1) { this.anim = null; knifeTrick(this.knife, 0, 'none'); this.applyTrick([0, 0, 0]); }
+      if (a.t >= 1) this.anim = null;
     }
     this.poseHand(dt);
     // portrait: keep the arm smaller and tucked into the corner so the fight stays visible

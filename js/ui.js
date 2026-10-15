@@ -9,6 +9,7 @@ import { rankEmblem } from './emblems.js';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const h = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const fmt = n => Math.round(n).toLocaleString('en-GB');
 const rc = r => RARITY[r].color;
 const hex = n => '#' + (n ?? 0).toString(16).padStart(6, '0');
@@ -142,7 +143,7 @@ export class UI {
   refreshLobby() {
     const r = rankOf(profile);
     $('#coins').textContent = fmt(profile.coins);
-    $('#lvlNum').textContent = profile.level;
+    $('#lvlNum').textContent = profile.level; $('#pcName').textContent = profile.name;
     $('#xpRing').style.strokeDashoffset = 94.2 * (1 - profile.xp / xpFor(profile.level));
     $('#pcRank').innerHTML = `${rankEmblem(r.idx, 18)}${r.name}`; $('#pcRank').style.color = r.color;
     const badge = (id, n) => { const b = $(id); b.classList.toggle('on', !!n); if (typeof n === 'number' || typeof n === 'string') b.textContent = n; };
@@ -412,11 +413,12 @@ export class UI {
       const me = rankOf(profile), T = this.app.thumbs;
       $('#vs').innerHTML = `<div class="pl me"><img class="av" src="${T.char(profile.outfit)}" alt=""><b>YOU</b><small style="color:${me.color}">${rankEmblem(me.idx, 18)}${me.name}</small><img class="kn" src="${T.knife(equippedItem(), 200, 100)}" alt=""></div>
         <div class="x">VS</div>
-        <div class="pl op"><img class="av" src="${T.char(data.outfit)}" alt=""><b>${data.name}<span class="tag">AI</span></b><small style="color:${data.rank.color}">${rankEmblem(data.rank.idx ?? 1, 18)}${data.rank.name}</small><img class="kn" src="${T.knife(data.item, 200, 100)}" alt=""></div>`;
+        <div class="pl op"><img class="av" src="${T.char(data.outfit)}" alt=""><b>${esc(data.name)}<span class="tag ${data.online ? 'live' : ''}">${data.online ? 'LIVE' : 'AI'}</span></b><small style="color:${data.rank.color}">${rankEmblem(data.rank.idx ?? 1, 18)}${data.rank.name}</small><img class="kn" src="${T.knife(data.item, 200, 100)}" alt=""></div>`;
       $('#vs').classList.add('show');
     } else { clearInterval(this.mmTimer); this.overlay('mm', false); }
   }
 
+  mmStatus(text) { const el = $('#mmTime'); if (el) el.textContent = text; clearInterval(this.mmTimer); }
   // ---------- HUD ----------
   startHud(opName) {
     this.go('hud');
@@ -617,16 +619,20 @@ export class UI {
       <label>Volume <input type="range" id="sVol" min="0" max="1" step="0.05" value="${s.vol}"></label>
       <label>Graphics <select id="sQ"><option value="high">High (bloom)</option><option value="low">Fast</option></select></label>
       <label>Vibration <input type="checkbox" id="sHap" ${s.haptics ? 'checked' : ''}></label>
+      ${inMatch ? '' : `<label>Your name <input id="sName" maxlength="16" value="${esc(profile.name)}" style="font:inherit;width:150px;padding:4px 8px;border-radius:8px;border:2px solid #050a24"></label>
+      <label>Online matchmaking <input type="checkbox" id="sOnline" ${s.online !== false ? 'checked' : ''}></label>`}
       <div class="controls-list">${touch
         ? '<b>Left stick</b> move · push <b>fully up</b> or <b>double-flick up</b> to sprint<br><b>Right drag</b> look · <b>Tap/swipe</b> shank · <b>Double tap</b> finisher<br><b>Double-swipe</b> dash · <b>JUMP</b> to climb · <b>✦</b> inspect'
         : '<b>WASD</b> move · <b>Mouse</b> look · <b>Space</b> jump · <b>Shift</b> sprint<br><b>LMB</b> shank · <b>Double-click/E</b> finisher · <b>RMB</b> heavy<br><b>Q</b> or <b>double-tap A/S/D</b> dash · <b>F</b> inspect'}</div>
-      <small style="text-align:center;opacity:.5">Shankmaster v0.4.1 · test build</small>
+      <small style="text-align:center;opacity:.5">Shankmaster v0.5 · online test build</small>
       <div class="row">${inMatch ? '<button class="btn red" id="mQuit">FORFEIT</button><button class="btn green" id="mResume">RESUME</button>' : '<button class="btn ghost small" id="mTut">REPLAY TUTORIAL</button><button class="btn green" id="mClose">DONE</button>'}</div>`);
     $('#sQ').value = s.quality;
     $('#sSens').oninput = e => { s.sens = +e.target.value; this.app.input.sens = s.sens; save(); };
     $('#sVol').oninput = e => { s.vol = +e.target.value; A.setVolume(s.vol); save(); };
     $('#sQ').onchange = e => { s.quality = e.target.value; save(); this.app.applyQuality(); };
     $('#sHap').onchange = e => { s.haptics = e.target.checked; save(); };
+    if ($('#sName')) { $('#sName').oninput = e => { const v = e.target.value.replace(/[^\w .-]/g, '').slice(0, 16).trim(); if (v.length >= 2) { profile.name = v; save(); this.refreshLobby(); } }; $('#sName').addEventListener('keydown', e => e.stopPropagation()); }
+    if ($('#sOnline')) $('#sOnline').onchange = e => { s.online = e.target.checked; save(); };
     if (inMatch) { $('#mResume').onclick = () => { this.closeModal(); this.app.resume(); }; $('#mQuit').onclick = () => { this.closeModal(); this.app.forfeit(); }; }
     else { $('#mClose').onclick = () => { A.uiClick(); this.closeModal(); }; $('#mTut').onclick = () => { profile.learned = {}; save(); this.closeModal(); this.gToast('Tutorial hints back on'); }; }
   }

@@ -10,6 +10,8 @@ import { Match } from './game.js';
 import { MenuStage } from './menu.js';
 import { ChestReveal } from './reveal.js';
 import { Post } from './post.js';
+import { Matchmaker, NetSession } from './net.js';
+import { NET } from './netconfig.js';
 import { makeEnvScene } from './textures.js';
 import { updateKnifeFX } from './knives.js';
 export const VERSION = 'v0.4';
@@ -56,6 +58,7 @@ class App {
     addEventListener('resize', () => this.resize()); this.resize();
     document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement && this.match && this.match.state !== 'over' && !this.paused && !this.input.touch) this.pause(); });
     document.addEventListener('visibilitychange', () => { if (document.hidden && !window.__test && this.match && this.match.state !== 'over') this.pause(); });
+    addEventListener('pagehide', () => this.session?.close());
     const unlock = () => { A.initAudio(profile.settings.vol); A.ambience(this.mode === 'match'); };
     addEventListener('pointerdown', unlock); addEventListener('touchstart', unlock, { passive: true }); addEventListener('keydown', unlock);
     const dailyReady = dailyTick();
@@ -100,36 +103,63 @@ class App {
   endReveal() { this.mode = 'menu'; this.loadoutChanged(); }
 
   // ---------- matchmaking ----------
-  queue() {
+  // Find a real opponent online; if nobody turns up in time, play the AI so the loop stays instant.
+  async queue() {
     A.initAudio(profile.settings.vol);
     this.ui.mm('search');
-    clearTimeout(this.mmT);
+    clearTimeout(this.mmT); this.mmToken = (this.mmToken || 0) + 1; const token = this.mmToken;
+    if (profile.settings.online !== false) {
+      const r = rankOf(profile), it = equippedItem();
+      const card = { name: profile.name, outfit: profile.outfit, item: { knife: it.knife, skin: it.skin, seed: it.seed, float: it.float, trak: it.trak }, rank: { name: r.name, color: r.color, idx: r.idx }, level: profile.level };
+      this.mm = new Matchmaker();
+      const giveUp = setTimeout(() => this.mm?.cancel(), NET.searchSeconds * 1000);
+      let found = null;
+      try { found = await this.mm.search(card, st => this.ui.mmStatus(st.online > 1 ? `${st.online - 1} other player${st.online > 2 ? 's' : ''} searching…` : 'Searching for players online…')); } catch (e) { console.warn('matchmaking failed', e); }
+      clearTimeout(giveUp);
+      if (token !== this.mmToken) return; // cancelled
+      if (found) {
+        this.ui.mmStatus('Connecting…');
+        const session = new NetSession(found);
+        if (await session.connect()) {
+          if (token !== this.mmToken) { session.close(); return; }
+          const opp = { ...found.opp, online: true, difficulty: 0.5 };
+          this.ui.mm('found', opp);
+          this.mmT = setTimeout(() => { this.ui.mm('hide'); this.startMatch(opp, session); }, 2000);
+          return;
+        }
+        session.close();
+      }
+      this.ui.mmStatus('Nobody online right now — warming up vs AI');
+    }
     this.mmT = setTimeout(() => {
+      if (token !== this.mmToken) return;
       const r = rankOf(profile), games = profile.wins + profile.losses;
       const diff = games < PLACEMENT_GAMES ? 0.25 + games * 0.05 : Math.max(0.25, Math.min(0.95, 0.15 + r.pct * 0.9));
       const ti = Math.max(0, Math.min(RANKS.length - 1, (r.idx < 0 ? 1 : r.idx) + Math.round(Math.random() * 2 - 1))), tier = { ...RANKS[ti], idx: ti };
       const opp = { name: botName(), outfit: randomOutfit(), item: rollItem(), rank: tier, difficulty: diff };
       this.ui.mm('found', opp);
       this.mmT = setTimeout(() => { this.ui.mm('hide'); this.startMatch(opp); }, 2300);
-    }, 1400 + Math.random() * 2000);
+    }, profile.settings.online === false ? 1400 + Math.random() * 1500 : 700);
   }
-  cancelQueue() { clearTimeout(this.mmT); this.ui.mm('hide'); }
-  startMatch(opp) {
+  cancelQueue() { clearTimeout(this.mmT); this.mmToken++; this.mm?.cancel(); this.ui.mm('hide'); }
+  startMatch(opp, session) {
     this.mode = 'match'; this.menu.active = false;
     this.camera.fov = 80; this.camera.updateProjectionMatrix();
     const matchUI = Object.create(this.ui);
     matchUI.matchOver = (win, score, stats, earned) => this.finishMatch(win, score, stats, earned, opp);
+    this.session = session || null;
     this.input.enabled = true; this.input.reset();
     this.ui.startHud(opp.name);
     this.match = new Match({
       scene: this.scene, camera: this.camera, vm: this.vm, map: this.map, fx: this.fx, screen: this.screen, ui: matchUI, input: this.input,
-      me: { outfit: profile.outfit, item: equippedItem() }, opponent: opp, difficulty: opp.difficulty, finisher: profile.equipped.finisher,
+      me: { outfit: profile.outfit, item: equippedItem() }, opponent: opp, difficulty: opp.difficulty, finisher: profile.equipped.finisher, net: session,
     });
     A.ambience(true);
     if (!this.input.touch) canvas.requestPointerLock?.()?.catch?.(() => {});
   }
   finishMatch(win, score, stats, earned, opp) {
     this.input.enabled = false; document.exitPointerLock?.();
+    this.session?.close(); this.session = null;
     const rankBefore = rankOf(profile);
     profile.matches = (profile.matches || 0) + 1;
     if (win) { profile.wins++; profile.streak = Math.max(1, profile.streak + 1); } else { profile.losses++; profile.streak = Math.min(-1, profile.streak - 1); }
@@ -151,14 +181,16 @@ class App {
   }
   pause() {
     if (!this.match || this.paused || this.match.state === 'over') return;
-    this.paused = true; this.input.enabled = false; this.ui.settings(true);
+    // online the world can't stop for you — the menu opens but the match keeps running
+    this.paused = !this.match.net; this.input.enabled = false; this.ui.settings(true);
   }
   resume() { this.paused = false; this.input.enabled = true; this.input.reset(); if (!this.input.touch) canvas.requestPointerLock?.()?.catch?.(() => {}); this.clock.getDelta(); }
   forfeit() {
     this.paused = false;
-    if (this.match) { const m = this.match; m.state = 'over'; this.finishMatch(false, [m.score[0], 3], m.stats, m.earned, { name: m.op.name }); }
+    if (this.match) { const m = this.match; m.state = 'over'; this.finishMatch(false, [m.score[0], 3], m.stats, m.earned, { name: m.op.name }); } // finishMatch closes the session (sends 'bye')
   }
   toMenu() {
+    this.session?.close(); this.session = null;
     if (this.match) { this.match.dispose(); this.match = null; }
     this.input.enabled = false; this.fx.clear(); this.screen.clear();
     document.getElementById('lowhp').style.opacity = 0;

@@ -7,7 +7,7 @@ import { STEP } from './map.js';
 import * as A from './audio.js';
 import { BotBrain } from './bot.js';
 import { StreetLife } from './npcs.js';
-import { save } from './data.js';
+import { save, rng } from './data.js';
 
 const WALK = 2.4, RUN = 5.4, SPRINT = 8.0, DASH_SPEED = 17, DASH_T = 0.2, DASH_IFRAME = 0.18, DASH_CD = 0.8;
 const GRAV = 24, JUMP_V = 7.6, COYOTE = 0.12, JUMP_BUF = 0.14;
@@ -28,6 +28,31 @@ const yawTo = (from, to) => Math.atan2(-(to.x - from.x), -(to.z - from.z));
 const buzz = ms => { if (navigator.userActivation?.hasBeenActive) try { navigator.vibrate?.(ms); } catch (e) { /* unsupported */ } };
 const hdist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
+// Online opponent: renders the other player's 20 Hz snapshots ~110 ms in the past, smoothly interpolated.
+class RemoteBrain {
+  constructor(m) { this.m = m; this.buf = []; this.intent = null; this.atkId = -1; }
+  reset() { this.buf.length = 0; }
+  push(s) { s.rt = performance.now(); this.buf.push(s); if (this.buf.length > 40) this.buf.shift(); }
+  update() {
+    const op = this.m.op, b = this.buf; if (!b.length || op.dead) return;
+    const rt = performance.now() - 110;
+    let i = b.length - 1; while (i > 0 && b[i - 1].rt > rt) i--;
+    const s1 = b[i], s0 = b[Math.max(0, i - 1)];
+    const k = s1 === s0 ? 1 : Math.max(0, Math.min(1, (rt - s0.rt) / (s1.rt - s0.rt)));
+    op.pos.set(s0.p[0] + (s1.p[0] - s0.p[0]) * k, s0.p[1] + (s1.p[1] - s0.p[1]) * k, s0.p[2] + (s1.p[2] - s0.p[2]) * k);
+    let dy = s1.y - s0.y; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
+    op.yaw = s0.y + dy * k;
+    op.vel.set(s1.v[0], 0, s1.v[1]); op.vy = s1.vy; op.grounded = !!s1.g; op.sprint = !!s1.s; op.speed = Math.hypot(s1.v[0], s1.v[1]);
+    op.dashT = s1.i ? DASH_T : s1.d ? 0.01 : 0;
+    if (performance.now() > this.m.hpHold || s1.hp < op.hp) op.hp = s1.hp;
+    if (s1.a) {
+      const [kind, t, id] = s1.a;
+      if (id !== this.atkId) { this.atkId = id; A.whoosh(1, { x: op.pos.x, y: op.pos.y + 1.3, z: op.pos.z }); }
+      op.atk = { def: ATK[kind], t, hit: true };
+    } else op.atk = null;
+  }
+}
+
 class Fighter {
   constructor(isBot, outfit, item, name) {
     this.isBot = isBot; this.name = name; this.item = item;
@@ -39,6 +64,7 @@ class Fighter {
     this.hp = 100; this.dead = false; this.atk = null; this.combo = 0; this.comboT = 0; this.queued = false;
     this.dashT = 0; this.dashCd = 0; this.dashDir = new THREE.Vector3(); this.sprint = false; this.sprintT = 0;
     this.stun = 0; this.stepT = 0; this.finLock = false; this.speed = 0; this.noise = 0; this.lunge = 0;
+    this.atkId = this.atkId || 0;
     this.vy = 0; this.grounded = true; this.coyote = 0; this.jumpBuf = 0; this.airDash = false; this.boost = 0; this.vel.set(0, 0, 0);
   }
   get dashing() { return this.dashT > 0; }
@@ -46,36 +72,82 @@ class Fighter {
 }
 
 export class Match {
-  constructor({ scene, camera, vm, map, fx, screen, ui, input, me, opponent, difficulty, finisher }) {
+  constructor({ scene, camera, vm, map, fx, screen, ui, input, me, opponent, difficulty, finisher, net }) {
     Object.assign(this, { scene, camera, vm, map, fx, screen, ui, input, difficulty, finisher });
+    this.net = net || null; this.hpHold = 0; this.sendT = 0;
     this.me = new Fighter(false, me.outfit, me.item, 'You');
     this.op = new Fighter(true, opponent.outfit, opponent.item, opponent.name);
     this.op.model.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
     scene.add(this.op.model.root);
-    this.brain = new BotBrain(this);
-    this.street = new StreetLife(this);
+    this.brain = this.net ? new RemoteBrain(this) : new BotBrain(this);
+    this.street = new StreetLife(this, this.net ? rng(this.net.seed) : Math.random);
     this.score = [0, 0]; this.round = 0; this.state = 'intro'; this.stateT = 0; this.timeScale = 1; this.hitstop = 0;
     this.shake = 0; this.fov = 80; this.dip = 0; this.camRoll = 0; this.deathCam = 0; this.myCombo = 0; this.myComboT = 0;
     this.stats = { hits: 0, taken: 0, finishers: 0, backstabs: 0, dashDodges: 0, airHits: 0, pickups: 0, kills: 0, damage: 0 };
     this.earned = 0;
     this.pickups = []; this.pickupGroup = new THREE.Group(); scene.add(this.pickupGroup);
     vm.setLoadout(me.outfit, me.item);
-    this.startRound();
+    if (this.net) this.setupNet(); else this.startRound();
+  }
+  // ---------- online ----------
+  setupNet() {
+    const N = this.net;
+    N.on('st', d => this.brain.push(d))
+      .on('round', d => { if (!N.host && d.n > this.round) this.startRound(d); })
+      .on('ready', () => { if (!N.host) return; if (this.round === 0) this.startRound(); else if (this.roundSpec) N.send('round', this.roundSpec); }) // guest is listening (or missed a round)
+      .on('hit', d => this.netHit(d))
+      .on('dead', d => { if (!this.op.dead) this.kill(this.me, this.op, d.how, true); })
+      .on('fin', () => { if (this.state === 'live' && !this.me.dead) this.tryFinisher(this.op, this.me, true); })
+      .on('grab', d => { const p = this.pickups[d.i]; if (p && p.alive) { p.alive = false; p.respawn = Infinity; p.holder.visible = false; } })
+      .on('rend', d => { if (!N.host) this.endRound(d.w === 'draw' ? null : d.w === 'host' ? this.op : this.me, 'Time'); })
+      .on('bye', () => this.opponentLeft())
+      .on('left', () => this.opponentLeft());
+    this.state = 'waitRound'; this.readyT = 0; this.ui.toast?.('CONNECTED · GET READY', 1500);
+    if (!N.host) N.send('ready', {});
+  }
+  sendState() {
+    const me = this.me, r = v => Math.round(v * 1000) / 1000;
+    this.net.send('st', { p: [r(me.pos.x), r(me.pos.y), r(me.pos.z)], y: r(me.yaw), v: [r(me.vel.x), r(me.vel.z)], vy: r(me.vy), g: me.grounded ? 1 : 0, hp: me.hp,
+      a: me.atk ? [me.atk.def.kind, r(me.atk.t), me.atkId] : 0, d: me.dashing ? 1 : 0, i: me.iframe ? 1 : 0, s: me.sprint ? 1 : 0 });
+  }
+  // the other player hit me (they detect hits on their screen; I'm authoritative over my own health)
+  netHit(d) {
+    const f = this.op, t = this.me;
+    if (t.dead || this.state !== 'live' || t.finLock) return;
+    t.hp = Math.max(0, t.hp - d.dmg); t.stun = 0.28; if (t.atk && !t.atk.hit) t.atk = null;
+    t.pos.add(fwdOf(d.yaw).multiplyScalar(0.4)); this.map.resolve(t.pos, 0.38, t.pos.y); if (t.grounded) { t.vy = 2.2; t.grounded = false; }
+    const at = t.pos.clone().setY(t.pos.y + 1.2);
+    this.fx.burst(at, fwdOf(d.yaw).setY(0.15), d.dmg / 30);
+    d.kind === 'stab' || d.kind === 'heavy' ? A.stab(null) : A.slice(null);
+    if (d.behind) this.ui.banner('BACKSTAB!', '#ff3355'); if (d.air) this.ui.banner('AIR SHANK!', '#3de0ff');
+    this.hitstop = d.dmg > 40 ? 0.085 : 0.05; this.stats.taken++;
+    A.hurt(); this.hurtFx(d.dmg / 40, yawTo(t.pos, f.pos) - t.yaw);
+    this.street.alarm(t.pos);
+    if (t.hp <= 0) this.kill(f, t, d.how);
+  }
+  opponentLeft() {
+    if (this.state === 'over' || this.leftHandled) return; this.leftHandled = true;
+    this.state = 'over'; this.ui.banner('THEY LEFT', '#ffcc33'); this.ui.toast('Opponent disconnected — win for you', 2500);
+    setTimeout(() => this.ui.matchOver(true, this.score, this.stats, this.earned), 1200);
   }
   dispose() { this.op.model.dispose(); this.street.dispose(); this.scene.remove(this.pickupGroup); }
 
   // ---------- rounds ----------
-  startRound() {
+  startRound(spec) {
+    const pairs = this.map.spawns;
+    if (!spec) { spec = { n: this.round + 1, pi: Math.floor(Math.random() * pairs.length), swap: Math.random() < 0.5, seed: Math.floor(Math.random() * 1e9) }; if (this.net) this.net.send('round', spec); }
+    this.roundSpec = spec;
     this.round++;
-    const pairs = this.map.spawns, pair = pairs[Math.floor(Math.random() * pairs.length)], swap = Math.random() < 0.5;
-    const [a, b] = swap ? [pair[1], pair[0]] : pair;
+    const pair = pairs[spec.pi];
+    let [a, b] = spec.swap ? [pair[1], pair[0]] : pair;
+    if (this.net && !this.net.host) [a, b] = [b, a];
     [[this.me, a], [this.op, b]].forEach(([f, s]) => {
       f.reset(); f.pos.set(s.x, this.map.groundAt(s.x, s.z, 5).h, s.z); f.yaw = yawTo(f.pos, { x: 4, z: 0 }); f.pitch = 0; f.model.revive();
     });
     this.brain.reset();
     this.fx.clear(); this.screen.clear(); this.vm.blood = 0; this.vm.addBlood(0);
     this.vm.play('draw', 0.7); A.draw();
-    this.spawnPickups();
+    this.spawnPickups(rng(spec.seed));
     this.pingT = 0;
     this.state = 'countdown'; this.stateT = 3.2; this.deathCam = 0; this.camRoll = 0; this.timeScale = 1;
     this.ui.roundIntro(this.round, this.score);
@@ -100,7 +172,7 @@ export class Match {
   }
   // A vehicle hit a fighter standing in the road.
   trafficHit(f, v, side) {
-    if (f.iframe || f.finLock) return;
+    if (f.iframe || f.finLock || (this.net && f === this.op)) return;
     f.hp = Math.max(0, f.hp - v.dmg);
     f.vel.set(side * (v.kind === 'bike' ? 4 : 8), 0, -v.speed * 0.7); f.vy = v.kind === 'bike' ? 4 : 7.5; f.grounded = false;
     f.stun = 0.7; f.atk = null; f.sprint = false; f.dashT = 0;
@@ -115,10 +187,10 @@ export class Match {
   coins(n, why) { this.earned += n; this.ui.coinPop(n, why); }
 
   // ---------- pickups ----------
-  spawnPickups() {
+  spawnPickups(r = Math.random) {
     this.pickupGroup.clear(); this.pickups = [];
-    const spots = [...this.map.pickupSpots].sort(() => Math.random() - 0.5).slice(0, 3);
-    spots.forEach((s, i) => this.addPickup(s, i === 0 ? 'chicken' : Math.random() < 0.5 ? 'chicken' : 'drink'));
+    const spots = this.map.pickupSpots.map(s => [r(), s]).sort((a, b) => a[0] - b[0]).map(x => x[1]).slice(0, 3);
+    spots.forEach((s, i) => this.addPickup(s, i === 0 ? 'chicken' : r() < 0.5 ? 'chicken' : 'drink'));
   }
   addPickup(spot, type) {
     const g = new THREE.Group();
@@ -149,14 +221,15 @@ export class Match {
       if (!p.alive) { p.respawn -= dt; if (p.respawn <= 0) { this.pickupGroup.remove(p.holder); this.pickups.splice(this.pickups.indexOf(p), 1); const free = this.map.pickupSpots.filter(s => !this.pickups.some(q => q.spot === s)); this.addPickup(free[Math.floor(Math.random() * free.length)], Math.random() < 0.55 ? 'chicken' : 'drink'); } continue; }
       p.item.rotation.y += dt * 2; p.item.position.y = Math.sin(p.t * 3) * 0.08;
       for (const f of [this.me, this.op]) {
-        if (f.dead || this.state !== 'live') continue;
+        if (f.dead || this.state !== 'live' || (this.net && f === this.op)) continue; // online: the other player reports their own grabs
         if (hdist(f.pos, p.holder.position) < 0.95 && Math.abs(f.pos.y - p.y) < 1.2) this.grab(f, p);
       }
     }
   }
   grab(f, p) {
     if (p.type === 'chicken' && f.hp >= 100) return;
-    p.alive = false; p.respawn = 12; p.holder.visible = false;
+    p.alive = false; p.respawn = this.net ? Infinity : 12; p.holder.visible = false;
+    if (this.net && f === this.me) this.net.send('grab', { i: this.pickups.indexOf(p) });
     if (p.type === 'chicken') f.hp = Math.min(100, f.hp + 35); else { f.boost = 6; f.dashCd = 0; }
     if (!f.isBot) { this.stats.pickups++; this.ui.pickup(PICKUPS[p.type].name, p.type); A.pickup(p.type); this.vm.flashColor?.(p.type === 'chicken' ? 0xff4444 : 0x2ee6ff); }
     else A.pickup(p.type, { x: f.pos.x, y: 1, z: f.pos.z });
@@ -177,26 +250,37 @@ export class Match {
       const before = Math.ceil(this.stateT); this.stateT -= rdt; const after = Math.ceil(this.stateT);
       if (after !== before && after > 0) { A.beep(660, 0.1, 0.25); this.ui.countdown(after); }
       if (this.stateT <= 0) { this.state = 'live'; this.ui.countdown('FIGHT!'); A.beep(1320, 0.25, 0.3); A.ambience(true); }
-      events.filter(e => e.type === 'inspect').forEach(() => this.vm.play('inspect', 2.4));
+      events.filter(e => e.type === 'inspect').forEach(() => this.vm.play('inspect', 2.8));
     } else if (this.state === 'live') {
       this.time -= dt;
       // radar ping keeps rounds snappy: after 20s both sides learn roughly where the other is
       if (ROUND_TIME - this.time > 20) { this.pingT = (this.pingT ?? 0) - dt; if (this.pingT <= 0) { this.pingT = 10; this.ping(); } }
       this.handleEvents(events);
-      this.brain.update(dt);
-      if (this.time <= 0) this.endRound(me.hp > op.hp ? me : op.hp > me.hp ? op : null, 'Time');
+      if (!this.net) this.brain.update(dt);
+      if (this.time <= 0 && (!this.net || this.net.host)) {
+        const w = me.hp > op.hp ? me : op.hp > me.hp ? op : null;
+        if (this.net) this.net.send('rend', { w: w === me ? 'host' : w === op ? 'guest' : 'draw' });
+        this.endRound(w, 'Time');
+      }
     } else if (this.state === 'roundEnd') {
       this.stateT -= rdt;
       if (this.stateT <= 0) {
         if (this.matchOver) { this.state = 'over'; this.ui.matchOver(this.score[0] > this.score[1], this.score, this.stats, this.earned); }
-        else this.startRound();
+        else if (!this.net || this.net.host) this.startRound();
+        else this.state = 'waitRound'; // guest: the host starts the next round
       }
     }
     if (this.state !== 'over') this.street.update(dt);
     if (this.state !== 'live') this.brain.intent = null;
-    const frozen = this.state === 'countdown' || this.state === 'over';
+    if (this.net) {
+      this.brain.update(dt);
+      this.sendT -= rdt; if (this.sendT <= 0 && this.state !== 'over') { this.sendT = 1 / 20; this.sendState(); }
+      if (performance.now() - this.net.lastHeard > 7000 && this.state !== 'over') this.opponentLeft();
+      if (!this.net.host && this.state === 'waitRound') { this.readyT -= rdt; if (this.readyT <= 0) { this.readyT = 1; this.net.send('ready', {}); } } // keep nudging until the round arrives
+    }
+    const frozen = this.state === 'countdown' || this.state === 'over' || this.state === 'waitRound';
     this.moveFighter(me, dt, frozen ? null : this.myMoveIntent());
-    this.moveFighter(op, dt, frozen ? null : this.brain.intent);
+    if (!this.net) this.moveFighter(op, dt, frozen ? null : this.brain.intent);
     this.separate();
     this.tickAttack(me, op, dt); this.tickAttack(op, me, dt);
     this.footsteps(me, dt); this.footsteps(op, dt);
@@ -237,7 +321,7 @@ export class Match {
         if (me.atk && !me.atk.hit) { me.atk = null; this.vm.cancel(); }
         me.sprint = true; me.sprintT = 8; me.sprintAge = 0; A.sprintStart(); this.ui.sprintFx(true); this.ui.learn('sprint');
       }
-      else if (e.type === 'inspect' && !me.atk) { this.vm.play('inspect', 2.4); this.ui.learn('inspect'); }
+      else if (e.type === 'inspect' && !me.atk) { this.vm.play('inspect', 2.8); this.ui.learn('inspect'); }
     }
   }
   dash(f, dir) {
@@ -265,6 +349,7 @@ export class Match {
     if (f.atk) { if (!forced && f.atk.t > f.atk.def.hitAt) f.queued = true; return; }
     const kind = forced || COMBO[f.comboT > 0 ? f.combo % 3 : 0];
     if (!forced) f.combo = (f.comboT > 0 ? f.combo : 0) + 1;
+    f.atkId = (f.atkId || 0) + 1;
     const def = ATK[kind];
     const extra = f.isBot ? (0.16 - 0.1 * this.difficulty) : 0;
     f.atk = { def: { ...def, hitAt: def.hitAt + extra, dur: def.dur + extra }, t: 0, hit: false };
@@ -283,8 +368,9 @@ export class Match {
     const d = hdist(f.pos, t.pos), ad = Math.abs(angDiff(yawTo(f.pos, t.pos), f.yaw));
     return d < 2.8 && ad < 0.9 && Math.abs(f.pos.y - t.pos.y) < 1.2 && this.map.segClear(f.pos.x, f.pos.z, t.pos.x, t.pos.z, 1.0);
   }
-  tryFinisher(f, t) {
-    if (!this.canFinish(f, t) || t.iframe) return false;
+  tryFinisher(f, t, forced) {
+    if (!forced && (!this.canFinish(f, t) || t.iframe)) return false;
+    if (this.net && f === this.me) { this.net.send('fin', {}); setTimeout(() => { if (f.finLock && !t.dead) f.finLock = t.finLock = false; }, 3000); }
     const fin = FINISHERS[f.isBot ? 'stitch' : this.finisher] || FINISHERS.stitch;
     f.finLock = t.finLock = true; f.atk = t.atk = null; f.sprint = false;
     f.yaw = yawTo(f.pos, t.pos); t.yaw = yawTo(t.pos, f.pos);
@@ -297,7 +383,7 @@ export class Match {
       t.model.flash(); this.hitstop = 0.05;
       if (!f.isBot) { this.screen.splat(last ? 1.6 : 0.9, (Math.random() - 0.5)); this.vm.addBlood(0.3); this.shake = 0.3; A.grunt({ x: at.x, y: at.y, z: at.z }, 1.05); buzz(30); }
       else { this.hurtFx(0.9); A.hurt(); }
-      if (last) this.kill(f, t, 'finisher');
+      if (last && !(this.net && t === this.op)) this.kill(f, t, 'finisher');
     };
     if (!f.isBot) {
       this.stats.finishers++;
@@ -326,6 +412,7 @@ export class Match {
   }
   resolveHit(f, t, def) {
     if (t.dead || f.dead) return;
+    if (this.net && f === this.op) return; // their hits arrive as 'hit' messages
     const d = hdist(f.pos, t.pos), dy = f.pos.y - t.pos.y;
     const ang = Math.abs(angDiff(yawTo(f.pos, t.pos), f.yaw));
     if (d > def.range || ang > def.cone || dy > 2.3 || dy < -1.4 || !this.map.segClear(f.pos.x, f.pos.z, t.pos.x, t.pos.z, Math.max(f.pos.y, t.pos.y) + 1.0)) return;
@@ -364,13 +451,16 @@ export class Match {
       A.hurt(); this.hurtFx(dmg / 40, yawTo(t.pos, f.pos) - t.yaw);
       this.me.yaw += (Math.random() - 0.5) * 0.12; this.me.pitch += 0.05;
     }
-    if (t.hp <= 0) this.kill(f, t, behind ? 'backstab' : air ? 'air' : def.kind);
+    const how = behind ? 'backstab' : air ? 'air' : def.kind;
+    if (this.net && t === this.op) { this.net.send('hit', { dmg, kind: def.kind, behind, air, how, yaw: f.yaw }); this.hpHold = performance.now() + 450; return; } // they confirm the kill
+    if (t.hp <= 0) this.kill(f, t, how);
   }
   hurtFx(k, fromAng = 0) {
     this.ui.hurt(k, fromAng); this.screen.splat(0.5 + k * 0.5, (Math.random() - 0.5) * 2); this.vm.flashHit(); this.shake = Math.max(this.shake, 0.22 + k * 0.15);
   }
-  kill(f, t, how) {
+  kill(f, t, how, fromNet) {
     if (t.dead) return;
+    if (this.net && t === this.me) this.net.send('dead', { how });
     t.dead = true; t.hp = 0; f.finLock = t.finLock = false; t.atk = null;
     const P = { x: t.pos.x, y: t.pos.y + 1, z: t.pos.z };
     if (t.isBot) {
@@ -443,7 +533,11 @@ export class Match {
   }
   separate() {
     const a = this.me.pos, b = this.op.pos, dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz), min = 0.8;
-    if (d < min && d > 1e-4 && Math.abs(a.y - b.y) < 1.5 && !this.me.dead && !this.op.dead) { const k = (min - d) / 2 / d; a.x -= dx * k; a.z -= dz * k; b.x += dx * k; b.z += dz * k; }
+    if (d < min && d > 1e-4 && Math.abs(a.y - b.y) < 1.5 && !this.me.dead && !this.op.dead) {
+      const k = (min - d) / 2 / d;
+      if (this.net) { a.x -= dx * k * 2; a.z -= dz * k * 2; } // online: only push myself, the other player owns their position
+      else { a.x -= dx * k; a.z -= dz * k; b.x += dx * k; b.z += dz * k; }
+    }
   }
   footsteps(f, dt) {
     if (f.dead || f.dashing || !f.grounded || f.speed < 1.2) { f.stepT = 0.15; return; }

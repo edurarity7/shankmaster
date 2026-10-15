@@ -449,3 +449,4 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 .tap-hint { position: absolute; left: 50%; bottom: calc(228px + var(--sb)); transform: translateX(-50%); font-size: 11px; font-weight: 900; opacity: .75; text-shadow: var(--stroke); pointer-events: none; animation: glowday 1.6s infinite; white-space: nowrap; }
 .navbar button { min-height: 60px; }
 .navbar button.on::after { content: ''; position: absolute; }
+.tag.live { background: var(--red); animation: glowday 1.2s infinite; }

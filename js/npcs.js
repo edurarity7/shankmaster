@@ -94,15 +94,15 @@ function dogModel() {
 }
 
 export class StreetLife {
-  constructor(match) {
-    this.m = match; this.group = new THREE.Group(); match.scene.add(this.group);
+  constructor(match, rand = Math.random) {
+    this.m = match; this.rand = rand; this.group = new THREE.Group(); match.scene.add(this.group);
     this.vehicles = []; this.peds = []; this.dogs = [];
-    this.spawnT = 2 + Math.random() * 3;
+    this.spawnT = 2 + rand() * 3;
     // per-match random cast
     const nPeds = 2 + Math.floor(Math.random() * 3), nDogs = Math.random() < 0.85 ? 1 + (Math.random() < 0.4 ? 1 : 0) : 0;
     for (let i = 0; i < nPeds; i++) this.addPed(i === 0 || Math.random() < 0.3 ? 'police' : 'civ');
     for (let i = 0; i < nDogs; i++) this.addDog();
-    this.mix = ['car', 'car', 'car', 'cab', 'cab', 'police', 'bike', 'bike', 'bus'].sort(() => Math.random() - 0.5);
+    this.mix = ['car', 'car', 'car', 'cab', 'cab', 'police', 'bike', 'bike', 'bus'].sort(() => rand() - 0.5);
   }
   dispose() { this.peds.forEach(p => p.ch.dispose()); this.vehicles.forEach(v => v.rider?.dispose()); this.m.scene.remove(this.group); }
 
@@ -114,7 +114,7 @@ export class StreetLife {
       mesh = new THREE.Group(); mesh.add(bikeModel()); len = 1.6; w = 0.6; h = 1.8; speed = 5.5; dmg = 8;
       rider = new Character(randomOutfit(), null); rider.root.position.set(0, -0.08, 0.15); rider.root.scale.setScalar(0.95); mesh.add(rider.root);
     } else { mesh = carModel(kind); len = 4.4; w = 1.9; h = 1.9; speed = kind === 'police' ? 12.5 : 10; dmg = 18; }
-    const x = kind === 'bike' ? LANE_X + (Math.random() - 0.5) * 1.2 : LANE_X;
+    const x = kind === 'bike' ? LANE_X + (this.rand() - 0.5) * 1.2 : LANE_X;
     mesh.position.set(x, 0, Z_START + len / 2); this.group.add(mesh);
     this.vehicles.push({ kind, mesh, len, w, h, speed, base: speed, dmg, rider, honked: new Set(), hitCd: new Map(), siren: kind === 'police' && Math.random() < 0.7, t: 0, whooshed: false });
   }
@@ -143,9 +143,9 @@ export class StreetLife {
     const M = this.m, fighters = [M.me, M.op], live = M.state === 'live';
     this.spawnT -= dt;
     if (this.spawnT <= 0) {
-      this.spawnT = 4 + Math.random() * 7;
+      this.spawnT = 4 + this.rand() * 7;
       const last = this.vehicles[this.vehicles.length - 1];
-      if (!last || last.mesh.position.z < Z_START - last.len - 6) { const k = this.mix.shift() || pick(['car', 'cab', 'bike', 'police', 'car']); this.mix.push(k); this.addVehicle(k); }
+      if (!last || last.mesh.position.z < Z_START - last.len - 6) { const k = this.mix.shift() || 'car'; this.mix.push(k); this.addVehicle(k); }
     }
     if (M.brain) M.brain.carDanger = null;
     for (let i = this.vehicles.length - 1; i >= 0; i--) {
