@@ -304,7 +304,7 @@ export class Match {
     if (this.input.sprintHeld && m.y > 0.2) { if (!me.sprint) { me.sprintAge = 0; this.ui.sprintFx(true); this.ui.learn('sprint'); } me.sprint = true; me.sprintT = Math.max(me.sprintT, 0.25); }
     if (me.sprint && (m.y < 0.2 || mag < 0.2) && (me.sprintAge || 0) > 0.2) { me.sprint = false; this.ui.sprintFx(false); }
     const base = me.sprint ? SPRINT : (this.input.walk ? WALK : RUN);
-    const speed = base * (me.boost > 0 ? 1.25 : 1) * (this.input.joy && !me.sprint ? Math.max(mag, 0.4) : mag);
+    const speed = base * (me.boost > 0 ? 1.25 : 1) * (this.input.joy && !me.sprint ? Math.min(1, Math.max(0.35, mag * 1.3)) : mag);
     return { dir: mag > 0.01 ? dir.normalize() : dir, speed };
   }
   handleEvents(events) {
@@ -573,9 +573,9 @@ export class Match {
       const want = yawTo(me.pos, this.op.pos); me.yaw += angDiff(want, me.yaw) * Math.min(1, dt * 10);
       me.pitch += (-0.12 - me.pitch) * Math.min(1, dt * 8);
     }
-    if (this.input.touch && !me.dead && !this.op.dead && this.state === 'live') {
+    if (this.input.touch && !this.input.lookT && !me.dead && !this.op.dead && this.state === 'live') {
       const d = hdist(me.pos, this.op.pos), ad = angDiff(yawTo(me.pos, this.op.pos), me.yaw);
-      if (d < 7 && Math.abs(ad) < 0.45 && this.map.segClear(me.pos.x, me.pos.z, this.op.pos.x, this.op.pos.z)) me.yaw += ad * Math.min(1, dt * 3.5);
+      if (d < 6 && Math.abs(ad) < 0.35 && this.map.segClear(me.pos.x, me.pos.z, this.op.pos.x, this.op.pos.z)) me.yaw += ad * Math.min(1, dt * 2);
     }
     this.camRoll += (roll - this.camRoll) * Math.min(1, dt * 10);
     const s = this.shake * this.shake;

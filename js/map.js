@@ -5,11 +5,19 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { toon, inked, Character } from './characters.js';
 import { PRESETS } from './data.js';
-import { brickTexture, asphaltTexture, paveTexture, grassTexture, signTexture, windowTexture, graffitiTexture, crateTexture, stripeTexture, radialTexture } from './textures.js';
+import { carDetails } from './vehicles.js';
+import { panelTexture, brickTexture, asphaltTexture, paveTexture, grassTexture, signTexture, windowTexture, graffitiTexture, crateTexture, stripeTexture, radialTexture, bumpOf, shadeStripTexture } from './textures.js';
 
 export const STEP = 0.4;
 const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0, ...o });
 const glow = (r, g, b) => new THREE.MeshBasicMaterial({ color: new THREE.Color(r, g, b) });
+// textured material + its matching bump map at the same tiling
+const surf = (src, rx, ry, o = {}, bump = 1.2) => {
+  const map = src.clone(); map.repeat.set(rx, ry); map.needsUpdate = true;
+  const b = bumpOf(src), m = std(0xffffff, { map, ...o });
+  if (b) { m.bumpMap = b.clone(); m.bumpMap.repeat.set(rx, ry); m.bumpMap.needsUpdate = true; m.bumpScale = bump; }
+  return m;
+};
 
 export class GameMap {
   constructor(quality = 'high') {
@@ -52,11 +60,11 @@ export class GameMap {
       c.position.set(Math.cos(a) * r, 50 + Math.random() * 35, Math.sin(a) * r); c.scale.y = 0.6; c.lookAt(0, c.position.y, 0); G.add(c);
     }
     // ---- ground ----
-    const grass = std(0xffffff, { map: grassTexture() }); grass.map.repeat.set(30, 30);
+    const grassT = grassTexture(), grass = surf(grassT, 30, 30, {}, 0.6);
     this.plane(220, 220, grass, 0, -0.01, 0);
-    const asphalt = std(0xffffff, { map: asphaltTexture(), roughness: 0.9 }); asphalt.map.repeat.set(2, 16);
+    this.asphaltT = asphaltTexture(); const asphalt = surf(this.asphaltT, 2, 16, { roughness: 0.88 }, 0.8);
     this.plane(8, 66, asphalt, 0, 0.0, 0);
-    const pave = std(0xffffff, { map: paveTexture() }); pave.map.repeat.set(1.5, 33);
+    const pave = surf(paveTexture(), 1.5, 33, { roughness: 0.85 }, 1.4);
     this.plane(3, 66, pave, -5.5, 0.06, 0); this.plane(3, 66, pave, 5.5, 0.06, 0);
     const kerb = this.M('kerb', () => std(0xd8d5ce));
     [-4, 4].forEach(x => this.box(0.2, 0.12, 66, kerb, x, 0, 0, { collide: false, shadow: false, round: 0.05 }));
@@ -65,7 +73,7 @@ export class GameMap {
     [-3.75, -3.6, 3.6, 3.75].forEach(x => this.plane(0.08, 66, yellow, x, 0.012, 0));
     for (let i = -3; i <= 3; i++) this.plane(0.55, 3, white, i * 1.1, 0.013, 0);
     [-4.4, 4.4].forEach(x => [-1.8, 1.8].forEach(z => this.beacon(x, z)));
-    const parkGrass = std(0xffffff, { map: grassTexture() }); parkGrass.map.repeat.set(6, 8);
+    const parkGrass = surf(grassT, 4, 5.3, {}, 0.6);
     this.plane(15, 20, parkGrass, 14.5, 0.03, 0);
     const path = this.M('path', () => std(0xe6d4b0));
     this.plane(15, 2.2, path, 14.5, 0.04, 0); this.plane(2.2, 20, path, 14, 0.045, 0);
@@ -93,7 +101,7 @@ export class GameMap {
     this.skip(-5.7, 24.5);
     this.postBox(5.2, -15);
     for (let z = -26; z <= 26; z += 13) { this.lamp(-4.4, z); if (z + 6.5 < 31) this.lamp(4.4, z + 6.5); }
-    for (let z = -30; z < 30; z += 6) if (Math.abs(z - 2) > 3 && z !== -30) this.box(0.45, 0.85, 3.6, this.M('wallb', () => std(0xffffff, { map: brickTexture('#a24c33') })), -6.6, 0, z + 1.8, { round: 0.06 });
+    for (let z = -30; z < 30; z += 6) if (Math.abs(z - 2) > 3 && z !== -30) this.box(0.45, 0.85, 3.6, this.M('wallb', () => surf(this.brickW ??= brickTexture('#a24c33'), 1.2, 0.3)), -6.6, 0, z + 1.8, { round: 0.06 });
     this.crates([[-5.2, -23.6, 0], [-5.4, -25.0, 0], [-5.4, -25.0, 1]]);
     this.scaffold(-6.3, -28.6, 2.2, 1.4, 5);
     this.crates([[5.4, 12.8, 0], [6.3, 12.8, 0], [6.3, 13.9, 0], [6.3, 13.9, 1]]);
@@ -129,7 +137,7 @@ export class GameMap {
   }
   terrace(x0, x1, z0, z1, face, brick, h, seed) {
     const w = x1 - x0, d = z1 - z0, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-    const mat = std(0xffffff, { map: brick.clone() }); mat.map.needsUpdate = true; mat.map.repeat.set(Math.max(w, d) / 3, h / 3);
+    const mat = surf(brick, Math.max(w, d) / 3, h / 3);
     this.box(w, h, d, mat, cx, 0, cz);
     const trim = this.M('trim', () => std(0xf3ece0));
     const out = face === 'x+' ? 1 : -1, fx = face === 'x+' ? x1 : x0;
@@ -139,6 +147,7 @@ export class GameMap {
     const rg = new THREE.ExtrudeGeometry(roofShape, { depth: d, bevelEnabled: false }); rg.translate(0, 0, -d / 2);
     this.mesh(rg, this.M('roof' + (seed % 2), () => std(seed % 2 ? 0x3c4258 : 0x4a3a3a, { roughness: 0.9 })), cx, h, cz);
     const ry = face === 'x+' ? Math.PI / 2 : -Math.PI / 2;
+    this.shadeStrip(fx + out * 0.55, cz, 1.1, d, out);
     const houses = Math.max(1, Math.round(d / 4.5)), hw = d / houses;
     const doorCols = [0x1f4fbf, 0xc8102e, 0x1d8b4a, 0x111111, 0xf2c418, 0x6a2a8a];
     const frame = this.M('frame', () => std(0xffffff));
@@ -154,19 +163,24 @@ export class GameMap {
           const lit = (seed * 7 + i * 3 + f + (off > 0 ? 1 : 0)) % 4 === 0;
           const wz = z + hw * off, wy = 1.6 + f * 3;
           this.box(0.1, 1.75, 1.3, frame, fx + out * 0.03, wy - 0.88, wz, { collide: false, shadow: false });
-          const win = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.5), this.M('win' + lit, () => new THREE.MeshBasicMaterial({ map: windowTexture(lit), color: lit ? new THREE.Color(1.6, 1.4, 1.1) : 0xffffff })));
+          const v = (seed + i * 2 + f) % 3;
+          const win = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.5), this.M('win' + lit + v, () => lit ? new THREE.MeshStandardMaterial({ map: windowTexture(true, v), emissiveMap: windowTexture(true, v, true), emissive: new THREE.Color(1.5, 1.3, 1.0), roughness: 0.2 })
+            : new THREE.MeshStandardMaterial({ map: windowTexture(false, v), roughness: 0.08, metalness: 0, envMapIntensity: 1.8 })));
           win.position.set(fx + out * 0.09, wy, wz); win.rotation.y = ry; this.group.add(win);
           this.box(0.25, 0.08, 1.4, frame, fx + out * 0.12, wy - 0.86, wz, { collide: false, shadow: false });
+          if (f === 1 && (seed + i + (off > 0 ? 1 : 0)) % 3 === 0) this.flowerBox(fx + out * 0.26, wy - 0.78, wz, (seed + i) % 4);
         }
       }
+      if (i > 0) this.mesh(new THREE.CylinderGeometry(0.055, 0.055, h - 0.3, 8), this.M('pipe', () => std(0x23262e, { roughness: 0.5, metalness: 0.3 })), fx + out * 0.12, (h - 0.3) / 2, z0 + hw * i, { shadow: false });
+      if ((seed + i) % 3 === 1 && h > 6) { const dish = this.mesh(new THREE.SphereGeometry(0.32, 14, 8, 0, Math.PI * 2, 0, 0.9), this.M('dish', () => std(0xe8e8ec, { roughness: 0.4, side: THREE.DoubleSide })), fx + out * 0.35, h - 1.6, z - hw * 0.05, { shadow: false }); dish.rotation.z = -out * 1.2; }
       this.box(0.8, 1.4, 1.1, this.M('chim', () => std(0x9a4a34)), cx, h + 1.2, z0 + hw * i + 0.9, { collide: false });
       [-0.2, 0.2].forEach(o => this.mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.35, 10), this.M('pot', () => std(0xc8703a)), cx + o, h + 2.75, z0 + hw * i + 0.9, { shadow: false }));
     }
   }
   tower(x0, x1, z0, z1) {
     const h = 34, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-    this.box(x1 - x0, h, z1 - z0, this.M('tower', () => std(0xd9d2c6)), cx, 0, cz);
-    const winMat = this.M('twin', () => new THREE.MeshBasicMaterial({ map: windowTexture(false) })), litMat = this.M('twinl', () => new THREE.MeshBasicMaterial({ map: windowTexture(true), color: new THREE.Color(1.6, 1.4, 1.1) }));
+    this.box(x1 - x0, h, z1 - z0, this.M('tower', () => surf(panelTexture(), (z1 - z0) / 6, h / 6, { roughness: 0.9 }, 1)), cx, 0, cz);
+    const winMat = this.M('twin', () => new THREE.MeshStandardMaterial({ map: windowTexture(false, 2), roughness: 0.08, envMapIntensity: 1.8 })), litMat = this.M('twinl', () => new THREE.MeshBasicMaterial({ map: windowTexture(true), color: new THREE.Color(1.6, 1.4, 1.1) }));
     const balc = this.M('balc', () => std(0x8a93a8));
     for (let f = 0; f < 10; f++) for (let i = 0; i < 6; i++) {
       const z = z0 + 1.6 + i * 3.4, y = 2 + f * 3.3;
@@ -178,7 +192,7 @@ export class GameMap {
   }
   shop(x0, x1, z0, z1, name, bg, fg, sub, glowC) {
     const w = x1 - x0, d = z1 - z0, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, h = 7.5;
-    this.box(w, h, d, std(0xffffff, { map: brickTexture('#a24b33') }), cx, 0, cz);
+    this.box(w, h, d, surf(this.brickS ??= brickTexture('#a24b33'), w / 3, h / 3), cx, 0, cz);
     const front = z1 + 0.03;
     this.box(w - 0.2, 1.5, 0.15, this.M('signbox', () => std(0x222222)), cx, 2.65, front - 0.02, { collide: false });
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.4, 1.3), new THREE.MeshBasicMaterial({ map: signTexture(name, { bg, fg, sub, glow: fg }), color: new THREE.Color(1.5, 1.5, 1.5) }));
@@ -189,7 +203,7 @@ export class GameMap {
   }
   bridge() {
     // railway bridge with a real tunnel opening — traffic drives in and out of the dark
-    const brick = std(0xffffff, { map: brickTexture('#6e3426', '#9d8a78') }); brick.map.repeat.set(4, 3);
+    const brick = surf(brickTexture('#6e3426', '#9d8a78'), 4, 3);
     this.box(18.4, 9, 3, brick, -12.8, 0, 33.5); this.box(18.4, 9, 3, brick, 12.8, 0, 33.5);
     this.box(7.2, 4.0, 3, brick, 0, 5.0, 33.5, { collide: false });
     const dark = new THREE.MeshBasicMaterial({ color: 0x03050e, side: THREE.BackSide });
@@ -201,12 +215,12 @@ export class GameMap {
   }
   // the street carries on north past the shops — traffic drives off into the fog
   northRoad() {
-    const asphalt = this.M('asph2', () => { const m = std(0xffffff, { map: asphaltTexture(), roughness: 0.9 }); m.map.repeat.set(1, 12); return m; });
+    const asphalt = this.M('asph2', () => surf(this.asphaltT, 1.1, 15, { roughness: 0.88 }, 0.8));
     this.plane(4.4, 60, asphalt, 0, 0.0, -62);
     const white = this.M('white', () => new THREE.MeshBasicMaterial({ color: 0xf6f6f6 }));
     for (let z = -34; z > -90; z -= 4) this.plane(0.14, 2, white, 0, 0.012, z);
     const bricks = [brickTexture('#b65a3c'), brickTexture('#8f4a36', '#cbb8a2')];
-    [-1, 1].forEach((sd, i) => { const m = std(0xffffff, { map: bricks[i] }); m.map.repeat.set(16, 3); this.box(10, 10, 56, m, sd * 7.3, 0, -66, { collide: false }); });
+    [-1, 1].forEach((sd, i) => this.box(10, 10, 56, surf(bricks[i], 16, 3), sd * 7.3, 0, -66, { collide: false }));
     const bol = this.M('bollard', () => std(0x16181d, { metalness: 0.5, roughness: 0.4 })), band = this.M('bolband', () => glow(1.6, 1.6, 1.6));
     [-2.0, 2.0].forEach(x => { this.mesh(new THREE.CylinderGeometry(0.12, 0.14, 1.0, 14), bol, x, 0.5, -32.3); this.mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.08, 14), band, x, 0.85, -32.3, { shadow: false }); });
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 1.0), new THREE.MeshBasicMaterial({ map: signTexture('ONE WAY ↑', { bg: '#1238c9', fg: '#ffffff', w: 256, h: 256, font: 'Rubik, Arial' }), color: new THREE.Color(1.3, 1.3, 1.3) }));
@@ -228,20 +242,19 @@ export class GameMap {
     this.collider(x - 1.3, x + 1.3, z - 5.25, z + 5.25, 4.5);
   }
   car(x, z, color, cab) {
-    const g = new THREE.Group(), body = std(color, { roughness: 0.3, metalness: 0.3 }), glass = this.M('cglass', () => std(0x1c2a4f, { roughness: 0.1, metalness: 0.6 }));
-    const b = new THREE.Mesh(new RoundedBoxGeometry(1.9, 0.85, 4.4, 4, 0.3), body); b.position.y = 0.75; g.add(b);
-    const t = new THREE.Mesh(new RoundedBoxGeometry(1.7, 0.78, cab ? 2.6 : 2.2, 4, 0.3), body); t.position.set(0, 1.45, cab ? 0.2 : 0.3); g.add(t);
-    [-0.86, 0.86].forEach(sx => { const w = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.5, cab ? 2.3 : 1.9), glass); w.position.set(sx, 1.5, cab ? 0.2 : 0.3); g.add(w); });
-    const fw = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.5, 0.02), glass); fw.position.set(0, 1.5, cab ? -1.1 : -0.81); fw.rotation.x = -0.3; g.add(fw);
-    if (cab) { const sign = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.18, 0.18, 2, 0.04), glow(2.2, 1.5, 0)); sign.position.set(0, 1.92, -0.3); g.add(sign); }
-    [-0.65, 0.65].forEach(hx => { const l = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), glow(2, 2, 1.7)); l.position.set(hx, 0.85, -2.18); g.add(l); });
+    const g = new THREE.Group(), body = std(color, { roughness: 0.28, metalness: 0.35 }), cz = cab ? 0.2 : 0.3, cl = cab ? 2.6 : 2.2;
+    const add = (geo, m, px, py, pz) => { const o = new THREE.Mesh(geo, m); o.position.set(px, py, pz); g.add(o); return o; };
+    add(new RoundedBoxGeometry(1.9, 0.85, 4.4, 4, 0.3), body, 0, 0.75, 0);
+    add(new RoundedBoxGeometry(1.7, 0.78, cl, 4, 0.3), body, 0, 1.45, cz);
+    carDetails(add, cz, cl);
+    if (cab) add(new RoundedBoxGeometry(0.5, 0.18, 0.18, 2, 0.04), glow(2.2, 1.5, 0), 0, 1.92, -0.3);
     const wheel = this.M('tyre', () => std(0x151515));
-    [[-0.9, -1.4], [0.9, -1.4], [-0.9, 1.4], [0.9, 1.4]].forEach(([wx, wz]) => { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.25, 18), wheel); w.rotation.z = Math.PI / 2; w.position.set(wx, 0.36, wz); g.add(w); });
+    [[-0.9, -1.4], [0.9, -1.4], [-0.9, 1.4], [0.9, 1.4]].forEach(([wx, wz]) => { const w = add(new THREE.CylinderGeometry(0.36, 0.36, 0.25, 18), wheel, wx, 0.36, wz); w.rotation.z = Math.PI / 2; });
     g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     g.position.set(x, 0, z); this.group.add(g);
-    const oz = cab ? 0.2 : 0.3, hl = cab ? 1.3 : 1.1;
+    const hl = cl / 2;
     this.collider(x - 0.95, x + 0.95, z - 2.2, z + 2.2, 1.18);
-    this.collider(x - 0.85, x + 0.85, z + oz - hl, z + oz + hl, 1.86);
+    this.collider(x - 0.85, x + 0.85, z + cz - hl, z + cz + hl, 1.86);
   }
   phoneBox(x, z) {
     const red = this.M('busred', () => std(0xe0141e, { roughness: 0.35 }));
@@ -363,6 +376,15 @@ export class GameMap {
     this.box(0.06, 0.06, z1 - z0, m, x, 1.0, (z0 + z1) / 2, { collide: false });
     for (let z = z0; z <= z1; z += 0.3) this.box(0.04, 1.1, 0.04, m, x, 0, z, { collide: false, shadow: false });
     this.collider(x - 0.05, x + 0.05, z0, z1, 1.1);
+  }
+  flowerBox(x, y, z, k) {
+    this.box(0.3, 0.22, 1.2, this.M('fbox', () => std(0x2a2d33, { roughness: 0.6 })), x, y, z, { collide: false, shadow: false });
+    const cols = [0xff4f8a, 0xffd23a, 0xff7a1a, 0xb05cff], leaf = this.M('fleaf', () => toon(0x2f9a45)), bloom = this.M('fl' + k, () => toon(cols[k], { emissive: new THREE.Color(cols[k]).multiplyScalar(0.12) }));
+    for (let j = 0; j < 6; j++) { const dz = -0.48 + j * 0.19; this.mesh(new THREE.SphereGeometry(0.1, 8, 6), leaf, x, y + 0.27, z + dz, { shadow: false }); this.mesh(new THREE.SphereGeometry(0.06, 8, 6), bloom, x + 0.03, y + 0.36, z + dz + 0.05, { shadow: false }); }
+  }
+  shadeStrip(x, z, w, d, out = 1) { // soft contact shading where a wall meets the pavement
+    const m = this.M('shade', () => new THREE.MeshBasicMaterial({ map: shadeStripTexture(), color: 0x000000, transparent: true, opacity: 0.32, depthWrite: false }));
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), m); p.rotation.set(-Math.PI / 2, 0, out > 0 ? 0 : Math.PI); p.position.set(x, 0.072, z); p.renderOrder = 1; this.group.add(p);
   }
   // ---------- V3 dressing ----------
   blob(x, z, w, d, y = 0.03, k = 0.5) { // soft contact shadow so props sit on the ground

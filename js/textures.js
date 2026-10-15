@@ -238,38 +238,123 @@ function tex(c, rx = 1, ry = 1) {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); t.anisotropy = 8; return t;
 }
-export function brickTexture(base = '#b4553a', mortar = '#d9c7b0') {
-  const c = canvas(256, 256), x = c.getContext('2d'), r = rng(base.length * 77 + base.charCodeAt(1));
-  x.fillStyle = mortar; x.fillRect(0, 0, 256, 256);
-  const bw = 32, bh = 16;
-  for (let row = 0; row < 16; row++) for (let col = -1; col < 9; col++) {
-    const off = row % 2 ? bw / 2 : 0, v = (r() - 0.5) * 30;
-    const b = hex(parseInt(base.slice(1), 16));
-    x.fillStyle = `rgb(${b[0] + v},${b[1] + v * 0.6},${b[2] + v * 0.5})`;
-    x.fillRect(col * bw + off + 1.5, row * bh + 1.5, bw - 3, bh - 3);
+// Tileable value-noise field (wraps at the edge, so repeated ground/wall textures have no seams).
+// Precomputed into a typed array and cached — painting a 512² texture is then a cheap lookup per pixel.
+const fieldCache = new Map();
+function noiseField(seed, L0 = 8, oct = 4, W = 512) {
+  const key = `${seed}|${L0}|${oct}|${W}`; if (fieldCache.has(key)) return fieldCache.get(key);
+  const out = new Float32Array(W * W), r = rng(seed * 131 + 7), f = t => t * t * (3 - 2 * t);
+  const xi0 = new Int32Array(W), xi1 = new Int32Array(W), xfs = new Float32Array(W);
+  for (let o = 0, L = L0, a = 0.5; o < oct; o++, L *= 2, a *= 0.5) {
+    const g = new Float32Array(L * L); for (let i = 0; i < g.length; i++) g[i] = r() * 2 - 1;
+    const cell = W / L;
+    for (let x = 0; x < W; x++) { const fx = x / cell, i = Math.floor(fx); xi0[x] = i % L; xi1[x] = (i + 1) % L; xfs[x] = f(fx - i); }
+    for (let y = 0; y < W; y++) {
+      const fy = y / cell, yi = Math.floor(fy), yf = f(fy - yi), r0 = (yi % L) * L, r1 = ((yi + 1) % L) * L, row = y * W;
+      for (let x = 0; x < W; x++) {
+        const xf = xfs[x], A = g[r0 + xi0[x]], B = g[r0 + xi1[x]], C = g[r1 + xi0[x]], D = g[r1 + xi1[x]];
+        out[row + x] += a * (A + (B - A) * xf + (C - A + (A - B + D - C) * xf) * yf);
+      }
+    }
   }
-  return tex(c);
+  fieldCache.set(key, out); return out;
 }
+// Paint a colour map + matching bump map in one pass: f(px, py, i, o) writes [r, g, b, height] into o
+const BUMPS = new WeakMap();
+// the bump map painted alongside a texture (looked up on the original — clones share its image)
+export const bumpOf = t => BUMPS.get(t);
+function painted(W, H, f) {
+  const c = canvas(W, H), b = canvas(W, H), cx = c.getContext('2d'), bx = b.getContext('2d');
+  const img = cx.createImageData(W, H), bimg = bx.createImageData(W, H), d = img.data, bd = bimg.data, o = [0, 0, 0, 0];
+  for (let py = 0, i = 0; py < H; py++) for (let px = 0; px < W; px++, i++) {
+    f(px, py, i, o); const k = i * 4;
+    d[k] = o[0]; d[k + 1] = o[1]; d[k + 2] = o[2]; d[k + 3] = 255;
+    bd[k] = bd[k + 1] = bd[k + 2] = o[3] * 255; bd[k + 3] = 255;
+  }
+  cx.putImageData(img, 0, 0); bx.putImageData(bimg, 0, 0);
+  const t = tex(c), bt = new THREE.CanvasTexture(b); bt.wrapS = bt.wrapT = THREE.RepeatWrapping; bt.anisotropy = 8;
+  BUMPS.set(t, bt); return t;
+}
+const hash2 = (a, b, s = 0) => { let h = Math.imul(a, 374761393) ^ Math.imul(b, 668265263) ^ Math.imul(s, 1442695041); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+const texCache = new Map();
+const cached = (key, make) => { if (!texCache.has(key)) texCache.set(key, make()); return texCache.get(key); };
+// London stock brick: per-brick tone, burnt headers, speckle, recessed bevelled mortar (+ bump map)
+export function brickTexture(base = '#b4553a', mortar = '#d9c7b0') {
+  return cached('brick' + base + mortar, () => {
+    const B = hex(parseInt(base.slice(1), 16)), Mo = hex(parseInt(mortar.slice(1), 16)), seed = base.charCodeAt(2) * 31 + base.charCodeAt(4);
+    const N = noiseField(1, 8, 4), S = noiseField(2, 64, 2), bw = 64, bh = 32, gap = 3;
+    return painted(512, 512, (px, py, i, o) => {
+      const row = py >> 5, off = row % 2 ? bw / 2 : 0, lx = (px + off) % bw, ly = py % bh, col = ((px + off) / bw | 0) % 8;
+      const n = N[i], sp = S[i];
+      if (lx < gap || ly < gap) { const k = 0.8 + n * 0.25 + sp * 0.1; o[0] = Mo[0] * k; o[1] = Mo[1] * k; o[2] = Mo[2] * k; o[3] = 0.15; return; }
+      const h = hash2(row, col, seed), burnt = h < 0.12 ? 0.62 : h > 0.9 ? 1.16 : 1, tone = (h - 0.5) * 0.22 + 1;
+      const e = Math.min(lx - gap, bw - 1 - lx, ly - gap, bh - 1 - ly), bev = e < 3 ? (ly - gap < 3 || lx - gap < 3 ? 1.12 : 0.8) : 1;
+      const k = tone * burnt * bev * (0.9 + n * 0.22 + sp * 0.16);
+      o[0] = B[0] * k; o[1] = B[1] * k * (burnt < 1 ? 0.92 : 1); o[2] = B[2] * k; o[3] = 0.75 + sp * 0.15 - (e < 2 ? 0.2 : 0);
+    });
+  });
+}
+// Weathered asphalt: aggregate speckle, tar patches, a few sealed cracks
 export function asphaltTexture() {
-  const c = canvas(512, 512), x = c.getContext('2d'), N = makeNoise(5);
-  const img = x.createImageData(512, 512);
-  for (let i = 0; i < 512 * 512; i++) { const px = i % 512, py = (i / 512) | 0; const n = 70 + N.fbm(px / 40, py / 40, 4) * 30 + (N.r() - 0.5) * 18; img.data.set([n * 0.92, n * 0.9, n * 1.02, 255], i * 4); }
-  x.putImageData(img, 0, 0);
-  return tex(c);
+  return cached('asphalt', () => {
+    const N = noiseField(5, 4, 5), S = noiseField(6, 128, 1), P = noiseField(7, 2, 3), r = rng(41);
+    const cracks = []; for (let k = 0; k < 3; k++) { let x = 60 + r() * 390, y = 60 + r() * 300; const pts = [[x, y]]; for (let i = 0; i < 7; i++) { x += (r() - 0.5) * 22; y += 6 + r() * 9; pts.push([x, y]); } cracks.push(pts); }
+    const t = painted(512, 512, (px, py, i, o) => {
+      const s = S[i]; let g = 62 + N[i] * 26 + s * 26 + (hash2(px, py, 3) > 0.985 ? 40 : 0);
+      if (P[i] > 0.22) g *= 0.82; // patch repairs
+      o[0] = g * 0.93; o[1] = g * 0.94; o[2] = g * 1.02; o[3] = 0.5 + s * 0.4;
+    });
+    const x = t.image.getContext('2d'); x.strokeStyle = 'rgba(15,15,20,0.55)'; x.lineWidth = 1.3; x.lineJoin = 'round';
+    cracks.forEach(pts => { x.beginPath(); pts.forEach(([a, b], i) => i ? x.lineTo(a, b) : x.moveTo(a, b)); x.stroke(); });
+    t.needsUpdate = true; return t;
+  });
 }
+// Precast concrete panels for the tower block: soft staining, panel joints, rain streaks
+export function panelTexture() {
+  return cached('panel', () => {
+    const N = noiseField(21, 4, 5), S = noiseField(22, 64, 2), R = noiseField(23, 32, 1);
+    return painted(512, 512, (px, py, i, o) => {
+      const lx = px % 256, ly = py % 170.67;
+      if (lx < 3 || ly < 3) { o[0] = 120; o[1] = 116; o[2] = 112; o[3] = 0.1; return; }
+      const streak = Math.max(0, R[200 * 512 + px] - 0.05) * (0.4 + py / 512) * 0.5, s = S[i];
+      const g = 205 + N[i] * 22 + s * 10 - streak * 60;
+      o[0] = g; o[1] = g * 0.97; o[2] = g * 0.92; o[3] = 0.6 + s * 0.2;
+    });
+  });
+}
+// Concrete paving slabs (3×3 per tile), dark joints, chewing-gum dots, a hairline crack or two
 export function paveTexture() {
-  const c = canvas(256, 256), x = c.getContext('2d'), r = rng(3);
-  x.fillStyle = '#8a8c94'; x.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { const v = 170 + (r() - 0.5) * 22; x.fillStyle = `rgb(${v},${v},${v + 6})`; x.fillRect(i * 64 + 2, j * 64 + 2, 60, 60); }
-  for (let k = 0; k < 6; k++) { x.fillStyle = 'rgba(40,40,40,0.25)'; x.beginPath(); x.arc(r() * 256, r() * 256, 2 + r() * 4, 0, 7); x.fill(); }
-  return tex(c);
+  return cached('pave', () => {
+    const N = noiseField(3, 8, 4), S = noiseField(4, 128, 1), sz = 512 / 3, r = rng(3);
+    const gum = Array.from({ length: 22 }, () => [r() * 512, r() * 512, 2 + r() * 4]);
+    const t = painted(512, 512, (px, py, i, o) => {
+      const ix = (px / sz) | 0, iy = (py / sz) | 0, lx = px - ix * sz, ly = py - iy * sz;
+      const e = Math.min(lx, sz - lx, ly, sz - ly);
+      if (e < 2.5) { o[0] = 70; o[1] = 72; o[2] = 78; o[3] = 0.05; return; }
+      const tone = 0.9 + hash2(ix, iy, 77) * 0.2, s = S[i], bev = e < 6 ? 0.88 + e * 0.02 : 1;
+      const g = (172 + N[i] * 22 + s * 14) * tone * bev;
+      o[0] = g * 0.98; o[1] = g * 0.98; o[2] = g * 1.03; o[3] = 0.7 + s * 0.12 - (e < 6 ? (6 - e) * 0.05 : 0);
+    });
+    const x = t.image.getContext('2d');
+    gum.forEach(([a, b, rr]) => { x.fillStyle = 'rgba(60,60,66,0.45)'; x.beginPath(); x.ellipse(a, b, rr, rr * 0.8, 0, 0, 7); x.fill(); });
+    x.strokeStyle = 'rgba(60,60,70,0.5)'; x.lineWidth = 1.2; x.beginPath(); x.moveTo(40, 300); x.lineTo(80, 320); x.lineTo(110, 315); x.lineTo(150, 340); x.stroke();
+    t.needsUpdate = true; return t;
+  });
 }
+// Cartoon lawn: mottled greens, thousands of tiny blades, the odd daisy
 export function grassTexture() {
-  const c = canvas(256, 256), x = c.getContext('2d'), N = makeNoise(11);
-  const img = x.createImageData(256, 256);
-  for (let i = 0; i < 256 * 256; i++) { const px = i % 256, py = (i / 256) | 0; const n = N.fbm(px / 30, py / 30, 4); img.data.set([46 + n * 30, 140 + n * 50, 70 + n * 20, 255], i * 4); }
-  x.putImageData(img, 0, 0);
-  return tex(c);
+  return cached('grass', () => {
+    const N = noiseField(11, 4, 5), D = noiseField(12, 32, 2);
+    const t = painted(512, 512, (px, py, i, o) => { const n = N[i], d = D[i]; o[0] = 52 + n * 34 + d * 12; o[1] = 150 + n * 52 + d * 20; o[2] = 68 + n * 22; o[3] = 0.5 + d * 0.4; });
+    const x = t.image.getContext('2d'), r = rng(19);
+    for (let i = 0; i < 7000; i++) {
+      const a = r() * 512, b = r() * 512, l = 3 + r() * 6, k = r();
+      x.strokeStyle = k < 0.5 ? `rgba(30,${110 + r() * 40 | 0},50,0.55)` : `rgba(${120 + r() * 40 | 0},${200 + r() * 40 | 0},90,0.5)`;
+      x.lineWidth = 1.1; x.beginPath(); x.moveTo(a, b); x.lineTo(a + (r() - 0.5) * 3, b - l); x.stroke();
+    }
+    for (let i = 0; i < 26; i++) { const a = 10 + r() * 492, b = 10 + r() * 492; x.fillStyle = '#ffffff'; for (let k = 0; k < 5; k++) { x.beginPath(); x.arc(a + Math.cos(k * 1.26) * 2.2, b + Math.sin(k * 1.26) * 2.2, 1.6, 0, 7); x.fill(); } x.fillStyle = '#ffd23a'; x.beginPath(); x.arc(a, b, 1.4, 0, 7); x.fill(); }
+    t.needsUpdate = true; return t;
+  });
 }
 export function signTexture(text, { bg = '#111', fg = '#fff', font = 'Bangers, Impact, sans-serif', w = 512, h = 128, border, sub, glow } = {}) {
   const c = canvas(w, h), x = c.getContext('2d');
@@ -283,15 +368,35 @@ export function signTexture(text, { bg = '#111', fg = '#fff', font = 'Bangers, I
   if (sub) { x.shadowBlur = 0; x.font = `${h * 0.2}px Rubik, Arial, sans-serif`; x.fillText(sub, w / 2, h * 0.8); }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
 }
-export function windowTexture(lit) {
-  const c = canvas(64, 96), x = c.getContext('2d');
-  x.fillStyle = '#f1ece0'; x.fillRect(0, 0, 64, 96);
-  const g = x.createLinearGradient(0, 0, 0, 96);
-  if (lit) { g.addColorStop(0, '#ffe7a3'); g.addColorStop(1, '#ffb14a'); } else { g.addColorStop(0, '#9ec6e8'); g.addColorStop(1, '#3b5f8f'); }
-  x.fillStyle = g; x.fillRect(6, 6, 52, 84);
-  x.fillStyle = '#f1ece0'; x.fillRect(30, 6, 4, 84); x.fillRect(6, 44, 52, 4);
-  if (!lit) { x.fillStyle = 'rgba(255,255,255,0.35)'; x.beginPath(); x.moveTo(10, 40); x.lineTo(24, 10); x.lineTo(28, 10); x.lineTo(14, 40); x.fill(); }
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+// Sash window: painted frame, sky-reflecting glass, curtains / blinds / nets in a few variants
+const CURTAINS = ['#c8102e', '#1d4fbf', '#e8c35a', '#2e8b57', '#7a3a8a', '#f2efe6'];
+export function windowTexture(lit, variant = 0, glowMask = false) {
+  const c = canvas(128, 192), x = c.getContext('2d'), r = rng(variant * 17 + (lit ? 5 : 1));
+  x.fillStyle = '#f4efe4'; x.fillRect(0, 0, 128, 192);
+  const g = x.createLinearGradient(0, 0, 0, 192);
+  if (lit) { g.addColorStop(0, '#fff0b8'); g.addColorStop(1, '#ffae4a'); } else { g.addColorStop(0, '#bfe0ff'); g.addColorStop(0.45, '#6f9ad0'); g.addColorStop(1, '#24406e'); }
+  x.fillStyle = g; x.fillRect(10, 10, 108, 172);
+  const cc = CURTAINS[(variant * 5 + (lit ? 2 : 0)) % CURTAINS.length], kind = variant % 3;
+  x.globalAlpha = lit ? 0.75 : 0.92;
+  if (kind === 0) { // drawn-back curtains with folds
+    [[10, 34], [84, 34]].forEach(([cx0, w]) => { x.fillStyle = cc; x.fillRect(cx0, 10, w, 172); x.fillStyle = 'rgba(0,0,0,0.18)'; for (let i = 0; i < 4; i++) x.fillRect(cx0 + 4 + i * 8, 10, 3, 172); });
+  } else if (kind === 1) { // roller blind half down
+    x.fillStyle = cc; x.fillRect(10, 10, 108, 70); x.fillStyle = 'rgba(0,0,0,0.2)'; x.fillRect(10, 76, 108, 4);
+  } else { // net curtain
+    x.fillStyle = 'rgba(255,255,255,0.55)'; x.fillRect(10, 96, 108, 86); x.strokeStyle = 'rgba(255,255,255,0.6)'; for (let i = 14; i < 118; i += 6) { x.beginPath(); x.moveTo(i, 96); x.lineTo(i, 182); x.stroke(); }
+  }
+  x.globalAlpha = 1;
+  if (!lit) { x.fillStyle = 'rgba(255,255,255,0.32)'; x.beginPath(); x.moveTo(16, 92); x.lineTo(50, 14); x.lineTo(62, 14); x.lineTo(28, 92); x.fill(); x.fillStyle = 'rgba(255,255,255,0.18)'; x.beginPath(); x.moveTo(70, 180); x.lineTo(110, 100); x.lineTo(116, 100); x.lineTo(78, 180); x.fill(); }
+  x.fillStyle = '#f4efe4'; x.fillRect(60, 10, 8, 172); x.fillRect(10, 90, 108, 8); // sash bars
+  x.fillStyle = 'rgba(0,0,0,0.12)'; x.fillRect(10, 10, 108, 4); x.fillRect(10, 10, 4, 172);
+  if (glowMask) { x.fillStyle = '#000'; x.fillRect(0, 0, 128, 10); x.fillRect(0, 182, 128, 10); x.fillRect(0, 0, 10, 192); x.fillRect(118, 0, 10, 192); x.fillRect(60, 10, 8, 172); x.fillRect(10, 90, 108, 8); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+// Soft darkening strip (contact shading where walls meet the pavement)
+export function shadeStripTexture() {
+  const c = canvas(64, 4), x = c.getContext('2d'), g = x.createLinearGradient(0, 0, 64, 0);
+  g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.35, 'rgba(0,0,0,0.45)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 4); return new THREE.CanvasTexture(c);
 }
 export function graffitiTexture() {
   const c = canvas(512, 256), x = c.getContext('2d');

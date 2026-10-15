@@ -8,6 +8,7 @@ Run locally: `python3 devserver.py 8643` then open http://localhost:8643
 - `js/npcs.js` — street life: traffic through the tunnel (cars, cabs, police, bus, cyclists), pedestrians/police who panic, dogs
 - `js/bot.js` — AI opponent ("brain"); a future network brain plugs into the same interface
 - `js/map.js` — London map, parkour props, 2.5D collision
+- `js/vehicles.js` — shared car detailing (glass, lights, bumpers, plates) for parked cars and traffic
 - `js/characters.js` — cel-shaded characters with modular drip
 - `js/knives.js` / `js/textures.js` — HD knife models, inspect tricks (butterfly/flip), procedural + animated skins, ShankTrak
 - `js/emblems.js` — knife rank emblems
@@ -17,6 +18,11 @@ Run locally: `python3 devserver.py 8643` then open http://localhost:8643
 - `js/ui.js` — lobby tabs, locker, shop, quests, rank, HUD, results
 - `js/audio.js` — synthesised SFX and voice grunts
 - `js/data.js` — items, drip, quests, levels, profile (localStorage)
+
+## Controls
+
+- Touch: left side = floating joystick (push fully forward and hold to sprint) · right side drag = look, tap = shank, double tap = finisher · buttons for DASH (the only way to dash), JUMP, INSPECT, FINISH. Swipes never attack or dash.
+- Desktop: WASD + mouse · LMB shank · double-click/E finisher · RMB heavy · Space jump · Shift sprint · Q dash · F inspect.
 
 Install on iPhone: open the site in Safari → Share → Add to Home Screen (runs fullscreen).
 

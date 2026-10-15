@@ -14,7 +14,7 @@ import { Matchmaker, NetSession } from './net.js';
 import { NET } from './netconfig.js';
 import { makeEnvScene } from './textures.js';
 import { updateKnifeFX } from './knives.js';
-export const VERSION = 'v0.4';
+export const VERSION = 'v0.6';
 import * as A from './audio.js';
 
 const canvas = document.getElementById('gl');

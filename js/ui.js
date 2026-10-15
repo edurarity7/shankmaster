@@ -39,9 +39,9 @@ export function logoSVG() {
 const HINTS = [
   { id: 'move', touch: 'Drag the <b>left side</b> to move', desk: '<b>WASD</b> to move', icon: '👈', hx: '-6px', hy: '0px' },
   { id: 'look', touch: 'Drag the <b>right side</b> to look', desk: '<b>Mouse</b> to look around', icon: '👉', hx: '6px', hy: '0px' },
-  { id: 'attack', touch: '<b>Tap</b> or <b>swipe</b> to shank', desk: '<b>Left click</b> to shank', icon: '👆', hy: '-5px' },
+  { id: 'attack', touch: '<b>Tap</b> the right side to shank', desk: '<b>Left click</b> to shank', icon: '👆', hy: '-5px' },
   { id: 'jump', touch: 'Tap <b>JUMP</b> — climb crates & cars', desk: '<b>Space</b> to jump — climb crates & cars', icon: '⤒', hy: '-6px' },
-  { id: 'dash', touch: '<b>Double-swipe</b> right side to dash-dodge', desk: '<b>Double-tap A/D/S</b> or <b>Q</b> to dash', icon: '⇇', hx: '-8px', hy: '0px' },
+  { id: 'dash', touch: 'Tap <b>»</b> to dash-dodge', desk: 'Press <b>Q</b> to dash-dodge', icon: '»', hx: '-6px', hy: '0px' },
   { id: 'sprint', touch: 'Push the stick <b>all the way up</b> to sprint', desk: 'Hold <b>Shift</b> to sprint', icon: '⇈', hy: '-8px' },
   { id: 'inspect', touch: 'Tap <b>✦ INSPECT</b> to flex your knife', desk: 'Press <b>F</b> to inspect your knife', icon: '✦', hy: '-4px' },
 ];
@@ -622,9 +622,9 @@ export class UI {
       ${inMatch ? '' : `<label>Your name <input id="sName" maxlength="16" value="${esc(profile.name)}" style="font:inherit;width:150px;padding:4px 8px;border-radius:8px;border:2px solid #050a24"></label>
       <label>Online matchmaking <input type="checkbox" id="sOnline" ${s.online !== false ? 'checked' : ''}></label>`}
       <div class="controls-list">${touch
-        ? '<b>Left stick</b> move · push <b>fully up</b> or <b>double-flick up</b> to sprint<br><b>Right drag</b> look · <b>Tap/swipe</b> shank · <b>Double tap</b> finisher<br><b>Double-swipe</b> dash · <b>JUMP</b> to climb · <b>✦</b> inspect'
-        : '<b>WASD</b> move · <b>Mouse</b> look · <b>Space</b> jump · <b>Shift</b> sprint<br><b>LMB</b> shank · <b>Double-click/E</b> finisher · <b>RMB</b> heavy<br><b>Q</b> or <b>double-tap A/S/D</b> dash · <b>F</b> inspect'}</div>
-      <small style="text-align:center;opacity:.5">Shankmaster v0.5 · online test build</small>
+        ? '<b>Left stick</b> move · push <b>fully up</b> and hold to sprint<br><b>Right drag</b> look · <b>Tap</b> shank · <b>Double tap</b> finisher<br><b>»</b> dash · <b>JUMP</b> to climb · <b>✦</b> inspect'
+        : '<b>WASD</b> move · <b>Mouse</b> look · <b>Space</b> jump · <b>Shift</b> sprint<br><b>LMB</b> shank · <b>Double-click/E</b> finisher · <b>RMB</b> heavy<br><b>Q</b> dash · <b>F</b> inspect'}</div>
+      <small style="text-align:center;opacity:.5">Shankmaster v0.6 · online test build</small>
       <div class="row">${inMatch ? '<button class="btn red" id="mQuit">FORFEIT</button><button class="btn green" id="mResume">RESUME</button>' : '<button class="btn ghost small" id="mTut">REPLAY TUTORIAL</button><button class="btn green" id="mClose">DONE</button>'}</div>`);
     $('#sQ').value = s.quality;
     $('#sSens').oninput = e => { s.sens = +e.target.value; this.app.input.sens = s.sens; save(); };

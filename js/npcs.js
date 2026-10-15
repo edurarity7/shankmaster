@@ -8,6 +8,7 @@ import { Character } from './characters.js';
 import { randomOutfit } from './data.js';
 import { signTexture, stripeTexture } from './textures.js';
 import * as A from './audio.js';
+import { carDetails } from './vehicles.js';
 
 const std = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, ...o });
 const glow = (r, g, b) => new THREE.MeshBasicMaterial({ color: new THREE.Color(r, g, b) });
@@ -37,13 +38,11 @@ const M = (k, f) => MATS[k] ??= f();
 function carModel(kind) {
   const g = new THREE.Group();
   const col = kind === 'cab' ? 0x111214 : kind === 'police' ? 0xf4f6fa : pick([0xd8203a, 0x2a63e0, 0xb8c2cc, 0x1d8b4a, 0xffb800, 0x6a2a8a, 0x2b2f38]);
-  const body = std(col, { roughness: 0.25, metalness: 0.35 }), glass = M('glass', () => std(0x1c2a4f, { roughness: 0.08, metalness: 0.7 }));
+  const body = std(col, { roughness: 0.25, metalness: 0.35 });
   const add = (geo, m, x, y, z, rx = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.x = rx; g.add(o); return o; };
   add(rb(1.9, 0.85, 4.4, 0.3), body, 0, 0.75, 0);
   add(rb(1.7, 0.78, kind === 'cab' ? 2.6 : 2.2, 0.3), body, 0, 1.45, 0.25);
-  [-0.86, 0.86].forEach(x => add(new THREE.BoxGeometry(0.02, 0.5, kind === 'cab' ? 2.3 : 1.9), glass, x, 1.5, 0.25));
-  add(new THREE.BoxGeometry(1.5, 0.5, 0.02), glass, 0, 1.5, -0.95, -0.3);
-  [-0.65, 0.65].forEach(x => { add(new THREE.SphereGeometry(0.11, 10, 8), M('head', () => glow(2.6, 2.5, 2.0)), x, 0.85, -2.18); add(new THREE.BoxGeometry(0.3, 0.1, 0.05), M('tail', () => glow(2.4, 0.1, 0.1)), x, 0.9, 2.2); });
+  carDetails(add, 0.25, kind === 'cab' ? 2.6 : 2.2);
   if (kind === 'cab') add(rb(0.5, 0.18, 0.18, 0.04), M('cabsign', () => glow(2.4, 1.6, 0)), 0, 1.92, -0.3);
   if (kind === 'police') {
     const batt = std(0xffffff, { map: stripeTexture('#1238c9', '#ffd21a') }); batt.map.repeat.set(4, 1);
