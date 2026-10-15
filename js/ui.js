@@ -620,7 +620,7 @@ export class UI {
       <div class="controls-list">${touch
         ? '<b>Left stick</b> move · push <b>fully up</b> or <b>double-flick up</b> to sprint<br><b>Right drag</b> look · <b>Tap/swipe</b> shank · <b>Double tap</b> finisher<br><b>Double-swipe</b> dash · <b>JUMP</b> to climb · <b>✦</b> inspect'
         : '<b>WASD</b> move · <b>Mouse</b> look · <b>Space</b> jump · <b>Shift</b> sprint<br><b>LMB</b> shank · <b>Double-click/E</b> finisher · <b>RMB</b> heavy<br><b>Q</b> or <b>double-tap A/S/D</b> dash · <b>F</b> inspect'}</div>
-      <small style="text-align:center;opacity:.5">Shankmaster v0.4 · test build</small>
+      <small style="text-align:center;opacity:.5">Shankmaster v0.4.1 · test build</small>
       <div class="row">${inMatch ? '<button class="btn red" id="mQuit">FORFEIT</button><button class="btn green" id="mResume">RESUME</button>' : '<button class="btn ghost small" id="mTut">REPLAY TUTORIAL</button><button class="btn green" id="mClose">DONE</button>'}</div>`);
     $('#sQ').value = s.quality;
     $('#sSens').oninput = e => { s.sens = +e.target.value; this.app.input.sens = s.sens; save(); };
